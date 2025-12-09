@@ -43,7 +43,11 @@ app_license = "mit"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
+doctype_js = {
+    "Purchase Order": "public/js/purchase_order.js",
+    "Pick List": "public/js/pick_list.js",
+    "Stock Entry": "public/js/stock_entry.js"
+}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -83,7 +87,7 @@ app_license = "mit"
 # ------------
 
 # before_install = "sc_custom.install.before_install"
-# after_install = "sc_custom.install.after_install"
+after_install = "sc_custom.install.after_install"
 
 # Uninstallation
 # ------------
@@ -137,13 +141,39 @@ app_license = "mit"
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+    "Stock Entry": {
+        "validate": "sc_custom.doctype_events.stock_entry.validate_stock_entry"
+    },
+    "Delivery Note": {
+        "validate": "sc_custom.doctype_events.delivery_note.validate_delivery_note"
+    },
+    "Purchase Receipt": {
+        "validate": "sc_custom.doctype_events.purchase_receipt.validate_purchase_receipt"
+    },
+    "Sales Invoice": {
+        "validate": "sc_custom.doctype_events.sales_invoice.validate_sales_invoice"
+    },
+    "Purchase Invoice": {
+        "validate": "sc_custom.doctype_events.purchase_invoice.validate_purchase_invoice"
+    }
+}
+
+# Custom Fields
+fixtures = [
+    {
+        "doctype": "Custom Field",
+        "filters": [
+            [
+                "name", "in", [
+                    "Pick List Item-storage",
+                    "Manufacturing Settings-default_wip_storage",
+                    "Manufacturing Settings-default_fg_storage"
+                ]
+            ]
+        ]
+    }
+]
 
 # Scheduled Tasks
 # ---------------
