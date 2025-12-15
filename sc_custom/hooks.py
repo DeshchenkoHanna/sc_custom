@@ -46,7 +46,8 @@ app_license = "mit"
 doctype_js = {
     "Purchase Order": "public/js/purchase_order.js",
     "Pick List": "public/js/pick_list.js",
-    "Stock Entry": "public/js/stock_entry.js"
+    "Stock Entry": "public/js/stock_entry.js",
+    "Delivery Note": "public/js/delivery_note.js"
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
@@ -168,7 +169,8 @@ fixtures = [
                 "name", "in", [
                     "Pick List Item-storage",
                     "Manufacturing Settings-default_wip_storage",
-                    "Manufacturing Settings-default_fg_storage"
+                    "Manufacturing Settings-default_fg_storage",
+                    "Delivery Note Item-default_storage"
                 ]
             ]
         ]
