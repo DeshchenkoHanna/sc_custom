@@ -22,6 +22,13 @@ When creating Stock Entry from Pick List, storage locations are automatically co
 
 ### 3. Storage Validations (from 01.01.2026)
 
+> **Note on field names:** Different DocTypes use different field names for storage:
+> - `Stock Entry Detail`: `storage` (source), `to_storage` (target)
+> - `Purchase Receipt Item`: `storage` (target - despite the name)
+> - `Delivery Note Item`: `storage` (source)
+> - `Purchase Invoice Item`: `storage` (target - despite the name)
+> - `Sales Invoice Item`: `storage` (source)
+
 #### Stock Entry
 
 | Purpose | Source Storage | Target Storage |

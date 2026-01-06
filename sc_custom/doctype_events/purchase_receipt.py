@@ -11,7 +11,8 @@ def validate_purchase_receipt(doc, method=None):
     """
     Validate Purchase Receipt items
 
-    - to_storage field (Target Warehouse) is mandatory for all items
+    - storage field (Target Storage) is mandatory for all items
+      Note: In Purchase Receipt Item, 'storage' field represents target storage
 
     NOTE: Validation only applies to documents with posting_date >= 2026-01-01
     """
@@ -23,8 +24,9 @@ def validate_purchase_receipt(doc, method=None):
         return
 
     for item in doc.items:
-        # Validate 'to_storage' field (target warehouse) is mandatory
-        if not item.to_storage:
+        # Validate 'storage' field (target storage) is mandatory
+        # Note: In Purchase Receipt Item, 'storage' represents target storage
+        if not item.storage:
             frappe.throw(
                 _("Row #{0}: Target Storage field is mandatory for Purchase Receipt").format(
                     item.idx
