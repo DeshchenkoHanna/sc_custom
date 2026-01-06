@@ -1,1 +1,6 @@
 STORAGE_INHERITANCE_FEATURE.md
+
+# Byte-compiled files
+__pycache__/
+*.py[cod]
+*.class
