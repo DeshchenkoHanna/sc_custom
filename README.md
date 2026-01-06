@@ -22,6 +22,8 @@ When creating Stock Entry from Pick List, storage locations are automatically co
 
 ### 3. Storage Validations (from 01.01.2026)
 
+> **Note:** Storage validation only applies to items where `is_stock_item = 1`. Non-stock items are skipped.
+
 > **Note on field names:** Different DocTypes use different field names for storage:
 > - `Stock Entry Detail`: `storage` (source), `to_storage` (target)
 > - `Purchase Receipt Item`: `storage` (target - despite the name)

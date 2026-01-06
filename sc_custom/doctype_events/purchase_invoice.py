@@ -27,7 +27,13 @@ def validate_purchase_invoice(doc, method=None):
         return
 
     for item in doc.items:
-        # Validate 'storage' field (target warehouse) is mandatory when update stock is checked
+        # Only validate stock items
+        is_stock_item = frappe.db.get_value("Item", item.item_code, "is_stock_item")
+        if not is_stock_item:
+            continue
+
+        # Validate 'storage' field (target storage) is mandatory when update stock is checked
+        # Note: In Purchase Invoice Item, 'storage' represents target storage
         if not item.storage:
             frappe.throw(
                 _("Row #{0}: Target Storage field is mandatory for Purchase Invoice when 'Update Stock' is enabled").format(

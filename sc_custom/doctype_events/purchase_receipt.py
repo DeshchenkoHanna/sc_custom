@@ -24,6 +24,11 @@ def validate_purchase_receipt(doc, method=None):
         return
 
     for item in doc.items:
+        # Only validate stock items
+        is_stock_item = frappe.db.get_value("Item", item.item_code, "is_stock_item")
+        if not is_stock_item:
+            continue
+
         # Validate 'storage' field (target storage) is mandatory
         # Note: In Purchase Receipt Item, 'storage' represents target storage
         if not item.storage:

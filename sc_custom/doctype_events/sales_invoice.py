@@ -27,6 +27,11 @@ def validate_sales_invoice(doc, method=None):
         return
 
     for item in doc.items:
+        # Only validate stock items
+        is_stock_item = frappe.db.get_value("Item", item.item_code, "is_stock_item")
+        if not is_stock_item:
+            continue
+
         # Validate 'storage' field (source warehouse) is mandatory when update stock is checked
         if not item.storage:
             frappe.throw(
