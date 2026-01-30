@@ -74,6 +74,7 @@ def set_default_storage(doc):
     - Finished goods: target storage = default_fg_storage
     """
     supported_purposes = [
+        "Material Transfer",
         "Material Transfer for Manufacture",
         "Material Consumption for Manufacture",
         "Manufacture"
@@ -85,7 +86,7 @@ def set_default_storage(doc):
     default_wip_storage = frappe.db.get_single_value("Manufacturing Settings", "default_wip_storage")
     default_fg_storage = frappe.db.get_single_value("Manufacturing Settings", "default_fg_storage")
 
-    if doc.purpose == "Material Transfer for Manufacture":
+    if doc.purpose in ["Material Transfer", "Material Transfer for Manufacture"]:
         if doc.pick_list:
             # Get Pick List items if Stock Entry is created from Pick List
             pick_list_items = frappe.get_all(

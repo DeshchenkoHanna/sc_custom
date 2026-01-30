@@ -15,7 +15,7 @@ frappe.ui.form.on('Stock Entry', {
 			return;
 		}
 
-		if (frm.doc.purpose === 'Material Transfer for Manufacture') {
+		if (frm.doc.purpose === 'Material Transfer for Manufacture' || frm.doc.purpose === 'Material Transfer') {
 			if (frm.doc.pick_list) {
 				// Copy storage from Pick List items
 				copy_storage_from_pick_list(frm);
