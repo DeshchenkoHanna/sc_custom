@@ -134,9 +134,9 @@ after_install = "sc_custom.install.after_install"
 # ---------------
 # Override standard doctype classes
 
-# override_doctype_class = {
-# 	"ToDo": "custom_app.overrides.CustomToDo"
-# }
+override_doctype_class = {
+    "Stock Ledger Entry": "sc_custom.overrides.stock_ledger_entry.CustomStockLedgerEntry"
+}
 
 # Document Events
 # ---------------
