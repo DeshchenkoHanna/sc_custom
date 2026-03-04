@@ -37,6 +37,66 @@ def create_sc_custom_fields():
                 "insert_after": "default_fg_warehouse",
                 "translatable": 0
             }
+        ],
+        "Work Order": [
+            {
+                "fieldname": "wip_storage",
+                "label": "Work In Progress Storage",
+                "fieldtype": "Link",
+                "options": "Storage",
+                "insert_after": "wip_warehouse",
+                "translatable": 0
+            },
+            {
+                "fieldname": "fg_storage",
+                "label": "Target Storage",
+                "fieldtype": "Link",
+                "options": "Storage",
+                "insert_after": "fg_warehouse",
+                "translatable": 0
+            }
+        ],
+        "Serial No": [
+            {
+                "fieldname": "storage",
+                "label": "Storage",
+                "fieldtype": "Link",
+                "options": "Storage",
+                "insert_after": "warehouse",
+                "read_only": 1,
+                "translatable": 0
+            }
+        ],
+        "Serial and Batch Bundle": [
+            {
+                "fieldname": "storage",
+                "label": "Storage",
+                "fieldtype": "Link",
+                "options": "Storage",
+                "insert_after": "warehouse",
+                "reqd": 1,
+                "translatable": 0
+            }
+        ],
+        "Serial and Batch Entry": [
+            {
+                "fieldname": "storage",
+                "label": "Storage",
+                "fieldtype": "Link",
+                "options": "Storage",
+                "insert_after": "warehouse",
+                "translatable": 0
+            }
+        ],
+        "Stock Reservation Entry": [
+            {
+                "fieldname": "storage",
+                "label": "Storage",
+                "fieldtype": "Link",
+                "options": "Storage",
+                "insert_after": "warehouse",
+                "translatable": 0
+            }
         ]
     }
 

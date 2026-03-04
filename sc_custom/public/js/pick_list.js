@@ -1,169 +1,281 @@
 /**
  * Pick List customizations for SC Custom
- * Auto-populate Storage field based on available stock
+ *
+ * - Storage and batch_no field queries filtered by warehouse/storage
+ * - Cascade clearing: warehouse change → clear storage + batch,
+ *   storage change → clear batch
+ * - Pick Serial/Batch dialog patched to filter by storage
  */
 
-// Extend ERPNext's set_item_locations to add storage population
 frappe.ui.form.on('Pick List', {
-	onload: function(frm) {
-		// Watch for changes in locations table (when Work Order mapping completes)
-		frm._sc_custom_locations_length = 0;
-
-		// Set up interval to check for new items in locations table
-		if (frm._sc_custom_watch_interval) {
-			clearInterval(frm._sc_custom_watch_interval);
-		}
-
-		frm._sc_custom_watch_interval = setInterval(function() {
-			let current_length = frm.doc.locations ? frm.doc.locations.length : 0;
-
-			// If locations table grew (new items added)
-			if (current_length > frm._sc_custom_locations_length && current_length > 0) {
-				// Check if pick_manually is enabled
-				if (frm.doc.pick_manually) {
-					frm._sc_custom_locations_length = current_length;
-					return;
-				}
-
-				frm._sc_custom_locations_length = current_length;
-
-				// Wait for ERPNext to finish processing
-				setTimeout(function() {
-					populate_storage_for_all_items(frm, false);
-				}, 800);
-			} else {
-				frm._sc_custom_locations_length = current_length;
-			}
-		}, 500);
-	},
-
-	onload_post_render: function(frm) {
-		// Clear interval when form is closed
-		$(window).on('beforeunload', function() {
-			if (frm._sc_custom_watch_interval) {
-				clearInterval(frm._sc_custom_watch_interval);
-			}
-		});
-	},
-
 	setup: function(frm) {
-		// Override set_item_locations method to add storage population
-		frm.events.set_item_locations = function(frm, save) {
-			// Call original ERPNext method first
-			if (!(frm.doc.locations && frm.doc.locations.length)) {
-				frappe.msgprint(__("Add items in the Item Locations table"));
-				return;
+		// Storage query: filter by item_code + warehouse, show only storages with stock
+		frm.set_query("storage", "locations", (frm, cdt, cdn) => {
+			const row = locals[cdt][cdn];
+			return {
+				query: "sc_custom.api.queries.get_storage",
+				filters: {
+					item_code: row.item_code,
+					warehouse: row.warehouse,
+				},
+			};
+		});
+
+		// Batch query: filter by item_code + warehouse + storage
+		frm.set_query("batch_no", "locations", (frm, cdt, cdn) => {
+			const row = locals[cdt][cdn];
+			let filters = {
+				item_code: row.item_code,
+				warehouse: row.warehouse,
+			};
+			if (row.storage) {
+				filters.storage = row.storage;
 			}
-
-			frappe.call({
-				method: "set_item_locations",
-				doc: frm.doc,
-				args: {
-					save: save,
-				},
-				freeze: 1,
-				freeze_message: __("Setting Item Locations..."),
-				callback: function(r) {
-					refresh_field("locations");
-
-					// Populate storage after warehouses are set
-					setTimeout(function() {
-						populate_storage_for_all_items(frm, true); // force = always populate from "Get Item Locations"
-					}, 500);
-				},
-			});
-		};
+			return {
+				query: "sc_custom.api.queries.get_batch_no",
+				filters: filters,
+			};
+		});
 	}
 });
 
-// Function to populate storage for all items in the table
-// @param {Object} frm - Form object
-// @param {Boolean} force - Force populate even if pick_manually is checked
-function populate_storage_for_all_items(frm, force) {
-	// Skip if pick_manually is enabled (unless forced from "Get Item Locations")
-	if (frm.doc.pick_manually && !force) {
-		return;
-	}
+// Clear standard pick_serial_and_batch handler so only our custom one runs
+if (frappe.ui.form.handlers['Pick List Item']) {
+	frappe.ui.form.handlers['Pick List Item']['pick_serial_and_batch'] = [];
+}
 
-	if (!frm.doc.locations || frm.doc.locations.length === 0) {
-		return;
-	}
+// Pick List Item child table events
+frappe.ui.form.on('Pick List Item', {
+	warehouse: function(frm, cdt, cdn) {
+		// When warehouse changes, clear storage and batch_no
+		// Skip during dialog callback sync to avoid overwriting dialog values
+		if (frm._sc_skip_cascade) return;
+		frappe.model.set_value(cdt, cdn, 'storage', '');
+		frappe.model.set_value(cdt, cdn, 'batch_no', '');
+	},
 
-	// Call server method to allocate storage for entire table
-	frappe.call({
-		method: 'sc_custom.api.pick_list_storage.allocate_storage_for_pick_list',
-		args: {
-			locations_json: JSON.stringify(frm.doc.locations)
-		},
-		callback: function(r) {
-			if (r.message && r.message.length > 0) {
-				// Apply storage to each row (reverse order for splits)
-				r.message.reverse().forEach(function(allocation) {
-					if (!allocation.storage) {
-						return;
-					}
+	storage: function(frm, cdt, cdn) {
+		// When storage changes, clear batch_no
+		if (frm._sc_skip_cascade) return;
+		frappe.model.set_value(cdt, cdn, 'batch_no', '');
+	},
 
-					let row = frm.doc.locations.find(loc => loc.name === allocation.name);
-					if (!row) {
-						return;
-					}
+	pick_serial_and_batch: function(frm, cdt, cdn) {
+		// Override standard handler to pass storage context to the dialog
+		let item = locals[cdt][cdn];
+		frappe.db.get_value("Item", item.item_code, ["has_batch_no", "has_serial_no"]).then((r) => {
+			if (r.message && (r.message.has_batch_no || r.message.has_serial_no)) {
+				item.has_serial_no = r.message.has_serial_no;
+				item.has_batch_no = r.message.has_batch_no;
+				item.type_of_transaction = item.qty > 0 ? "Outward" : "Inward";
 
-					// Check if row needs to be split across multiple storages
-					if (allocation.split && allocation.additional_allocations && allocation.additional_allocations.length > 0) {
-						// Update original row with first storage
-						frappe.model.set_value(row.doctype, row.name, {
-							'storage': allocation.storage,
-							'stock_qty': allocation.qty,
-							'qty': allocation.qty / (row.conversion_factor || 1)
-						});
+				item.title = item.has_serial_no ? __("Select Serial No") : __("Select Batch No");
+				if (item.has_serial_no && item.has_batch_no) {
+					item.title = __("Select Serial and Batch");
+				}
 
-						// Add new rows for additional storages
-						allocation.additional_allocations.forEach(function(add_alloc) {
-							let new_row = frappe.model.add_child(frm.doc, 'Pick List Item', 'locations');
+				// Create dialog with storage-aware patches
+				let selector = new erpnext.SerialBatchPackageSelector(frm, item, (r) => {
+					if (r) {
+						let qty = Math.abs(r.total_qty);
+						let dialog_warehouse = selector.dialog.get_value("warehouse");
+						let dialog_storage = item.storage || '';
 
-							frappe.model.set_value(new_row.doctype, new_row.name, {
-								'item_code': row.item_code,
-								'item_name': row.item_name,
-								'description': row.description,
-								'warehouse': row.warehouse,
-								'storage': add_alloc.storage,
-								'uom': row.uom,
-								'stock_uom': row.stock_uom,
-								'conversion_factor': row.conversion_factor,
-								'stock_qty': add_alloc.qty,
-								'qty': add_alloc.qty / (row.conversion_factor || 1),
-								'sales_order': row.sales_order,
-								'sales_order_item': row.sales_order_item,
-								'material_request': row.material_request,
-								'material_request_item': row.material_request_item,
-								'work_order': row.work_order,
-								'product_bundle_item': row.product_bundle_item,
-								'batch_no': row.batch_no,
-								'serial_no': row.serial_no
+						// Set values synchronously on the row object.
+						// Standard update_bundle_entries discards callback's return value,
+						// so async frappe.model.set_value won't complete before frm.save().
+						item.serial_and_batch_bundle = r.name;
+						item.use_serial_batch_fields = 0;
+						item.qty = qty / flt(item.conversion_factor || 1,
+							precision("conversion_factor", item));
+						item.stock_qty = item.qty * (item.conversion_factor || 1);
+						item.warehouse = dialog_warehouse;
+						item.storage = dialog_storage;
+						frm.dirty();
+
+						// Set storage on the SABB and its entries
+						if (dialog_storage) {
+							frappe.call({
+								method: "sc_custom.api.queries.set_bundle_storage",
+								args: {
+									bundle_name: r.name,
+									storage: dialog_storage,
+								},
 							});
-						});
-
-						frappe.show_alert({
-							message: __('Item split across {0} storage locations', [allocation.additional_allocations.length + 1]),
-							indicator: 'blue'
-						}, 5);
-					} else {
-						// Single storage - just set it
-						frappe.model.set_value(row.doctype, row.name, 'storage', allocation.storage);
+						}
 					}
 				});
 
-				frm.refresh_field('locations');
-			}
-		}
-	});
-}
+				if (!selector.dialog) return;
 
-// Allow manual storage selection
-frappe.ui.form.on('Pick List Item', {
-	storage: function(frm, cdt, cdn) {
-		let row = locals[cdt][cdn];
-		// Mark that storage was manually set
-		row.__manually_set_storage = true;
+				// Add editable Storage field after Warehouse
+				let wh_control_el = selector.dialog.fields_dict.warehouse.$wrapper.closest('.frappe-control');
+				wh_control_el.css({
+					'width': 'calc(50% - 8px)',
+					'display': 'inline-block',
+					'vertical-align': 'top',
+					'margin-right': '16px'
+				});
+
+				// Create storage control container
+				let $storage_container = $('<div class="frappe-control" style="width: calc(50% - 8px); display: inline-block; vertical-align: top;"></div>');
+				$storage_container.insertAfter(wh_control_el);
+
+				// Ensure awesomplete dropdown renders above the dialog
+				$('<style>.modal .awesomplete > ul { z-index: 1060 !important; }</style>')
+					.appendTo(selector.dialog.$wrapper);
+
+				let storage_control = frappe.ui.form.make_control({
+					df: {
+						fieldtype: "Autocomplete",
+						fieldname: "storage",
+						label: __("Storage"),
+						placeholder: __("Select Storage"),
+						ignore_validation: 1,
+						get_query: function() {
+							let warehouse = selector.dialog.get_value("warehouse");
+							return {
+								query: "sc_custom.api.queries.get_storage_for_autocomplete",
+								params: {
+									item_code: item.item_code,
+									warehouse: warehouse || "",
+								}
+							};
+						},
+					},
+					parent: $storage_container,
+					render_input: true,
+				});
+				storage_control.set_value(item.storage || '');
+
+				// Always show dropdown on focus (even when field has a value)
+				storage_control.$input.on('focus', function() {
+					storage_control.$input.trigger('input');
+				});
+
+				// Handle storage selection/change
+				storage_control.$input.on('change', function() {
+					let new_storage = storage_control.get_value();
+					if (new_storage !== item.storage) {
+						item.storage = new_storage;
+						// Clear entries and re-fetch
+						selector.dialog.fields_dict.entries.df.data = [];
+						selector.dialog.fields_dict.entries.grid.refresh();
+						selector.get_auto_data();
+					}
+				});
+
+				// Store reference for use in patches
+				selector._storage_control = storage_control;
+
+				// Patch warehouse onchange to clear storage
+				let wh_field = selector.dialog.fields_dict.warehouse;
+				let original_wh_change = wh_field.df.onchange;
+				wh_field.df.onchange = function() {
+					storage_control.set_value('');
+					item.storage = '';
+					if (original_wh_change) original_wh_change();
+				};
+
+				// Patch entries table queries to include storage
+				let entries_field = selector.dialog.fields_dict.entries;
+				if (entries_field) {
+					let table_fields = entries_field.df.fields;
+					for (let f of table_fields) {
+						if (f.fieldname === 'batch_no' && item.has_batch_no) {
+							f.get_query = () => {
+								return {
+									query: "sc_custom.api.queries.get_batch_no",
+									filters: {
+										item_code: item.item_code,
+										warehouse: selector.dialog.get_value("warehouse") || item.warehouse,
+										storage: item.storage || '',
+									},
+								};
+							};
+						}
+						if (f.fieldname === 'serial_no' && item.has_serial_no) {
+							f.get_query = () => {
+								return {
+									query: "sc_custom.api.queries.get_serial_no",
+									filters: {
+										item_code: item.item_code,
+										warehouse: selector.dialog.get_value("warehouse") || item.warehouse,
+										storage: item.storage || '',
+									},
+								};
+							};
+						}
+					}
+				}
+
+				// Patch scan_serial_no field query to include storage
+				if (item.has_serial_no && selector.dialog.fields_dict.scan_serial_no) {
+					selector.dialog.fields_dict.scan_serial_no.df.get_query = () => {
+						return {
+							query: "sc_custom.api.queries.get_serial_no",
+							filters: {
+								item_code: item.item_code,
+								warehouse: selector.dialog.get_value("warehouse") || item.warehouse,
+								storage: item.storage || '',
+							},
+						};
+					};
+				}
+
+				// Patch auto-fetch to use storage-filtered method
+				let original_get_auto_data = selector.get_auto_data.bind(selector);
+				selector.get_auto_data = function() {
+					let values = this.dialog.get_values();
+					let qty = values.qty;
+
+					// Same early-return guards as standard get_auto_data:
+					// Don't re-fetch if SABB already exists and qty hasn't changed
+					if (item.serial_and_batch_bundle) {
+						let existing_qty = Math.abs(item.stock_qty || item.transfer_qty || item.qty || 0);
+						if (qty === existing_qty) {
+							return;
+						}
+					}
+					// Don't re-fetch if serial_no/batch_no already set
+					if (item.serial_no || item.batch_no) {
+						return;
+					}
+
+					let based_on = values.based_on || "FIFO";
+					let warehouse = this.dialog.get_value("warehouse") || item.warehouse;
+
+					if (qty && item.storage) {
+						let method = item.has_serial_no
+							? "sc_custom.api.queries.get_auto_serial_nos_with_storage"
+							: "sc_custom.api.queries.get_auto_batch_nos_with_storage";
+
+						frappe.call({
+							method: method,
+							args: {
+								item_code: item.item_code,
+								warehouse: warehouse,
+								storage: item.storage,
+								qty: qty,
+								based_on: based_on,
+							},
+							callback: (r) => {
+								if (r.message) {
+									this.dialog.fields_dict.entries.df.data = r.message;
+									this.dialog.fields_dict.entries.grid.refresh();
+								}
+							},
+						});
+					} else {
+						original_get_auto_data();
+					}
+				};
+
+				// Re-trigger auto-fetch with storage filter if storage is set
+				if (item.storage) {
+					selector.get_auto_data();
+				}
+			}
+		});
 	}
 });

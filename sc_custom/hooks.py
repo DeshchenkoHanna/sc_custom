@@ -47,7 +47,9 @@ doctype_js = {
     "Purchase Order": "public/js/purchase_order.js",
     "Pick List": "public/js/pick_list.js",
     "Stock Entry": "public/js/stock_entry.js",
-    "Delivery Note": "public/js/delivery_note.js"
+    "Work Order": "public/js/work_order.js",
+    "Delivery Note": "public/js/delivery_note.js",
+    "Batch": "public/js/batch.js"
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
@@ -89,6 +91,7 @@ doctype_js = {
 
 # before_install = "sc_custom.install.before_install"
 after_install = "sc_custom.install.after_install"
+after_migrate = ["sc_custom.custom_fields.create_sc_custom_fields"]
 
 # Uninstallation
 # ------------
@@ -157,6 +160,14 @@ doc_events = {
     },
     "Purchase Invoice": {
         "validate": "sc_custom.doctype_events.purchase_invoice.validate_purchase_invoice"
+    },
+    "Stock Ledger Entry": {
+        "after_insert": "sc_custom.overrides.serial_batch_storage.on_sle_after_insert"
+    },
+    "Pick List": {
+        "validate": "sc_custom.doctype_events.pick_list.clean_stale_sabb",
+        "before_submit": "sc_custom.doctype_events.pick_list.validate_pick_list",
+        "on_submit": "sc_custom.doctype_events.pick_list.sync_sabb_storage"
     }
 }
 
@@ -170,7 +181,11 @@ fixtures = [
                     "Pick List Item-storage",
                     "Manufacturing Settings-default_wip_storage",
                     "Manufacturing Settings-default_fg_storage",
-                    "Delivery Note Item-default_storage"
+                    "Delivery Note Item-default_storage",
+                    "Serial No-storage",
+                    "Serial and Batch Bundle-storage",
+                    "Serial and Batch Entry-storage",
+                    "Stock Reservation Entry-storage"
                 ]
             ]
         ]
