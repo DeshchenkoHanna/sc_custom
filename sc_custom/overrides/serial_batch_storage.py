@@ -370,9 +370,11 @@ def patched_validate_serial_nos_inventory(self):
         "serial_nos": serial_nos,
     }
 
-    # --- Phase 6 addition: storage filter ---
-    if self.get("storage"):
-        kwargs["storage"] = self.storage
+    # Note: storage filter intentionally NOT added here.
+    # Phase 3 (on_sle_after_insert) clears Serial No storage on outward SLEs
+    # BEFORE this validation runs, so filtering by storage would always fail
+    # for outward transactions. Warehouse check is sufficient; storage is
+    # validated separately in Pick List's validate_pick_list.
 
     if self.voucher_type == "POS Invoice":
         kwargs["ignore_voucher_nos"] = [self.voucher_no]
@@ -434,9 +436,9 @@ def patched_validate_batch_inventory(self):
         "consider_negative_batches": True,
     }
 
-    # --- Phase 6 addition: storage filter ---
-    if self.get("storage"):
-        kwargs["storage"] = self.storage
+    # Note: storage filter intentionally NOT added here (same reason as
+    # patched_validate_serial_nos_inventory — Phase 3 modifies storage on
+    # SLE after_insert before this validation runs).
 
     available_batches = sabb_module.get_auto_batch_nos(frappe._dict(kwargs))
 

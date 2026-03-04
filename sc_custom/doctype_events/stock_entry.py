@@ -86,27 +86,61 @@ def set_default_storage(doc):
     default_wip_storage = frappe.db.get_single_value("Manufacturing Settings", "default_wip_storage")
     default_fg_storage = frappe.db.get_single_value("Manufacturing Settings", "default_fg_storage")
 
+    # If linked to a Work Order, prefer its storage values over Manufacturing Settings defaults
+    wo_wip_storage = None
+    wo_fg_storage = None
+    if doc.work_order:
+        wo_wip_storage, wo_fg_storage = frappe.db.get_value(
+            "Work Order", doc.work_order, ["wip_storage", "fg_storage"]
+        ) or (None, None)
+
+    wip_storage = wo_wip_storage or default_wip_storage
+    fg_storage = wo_fg_storage or default_fg_storage
+
     if doc.purpose in ["Material Transfer", "Material Transfer for Manufacture"]:
         if doc.pick_list:
             # Get Pick List items if Stock Entry is created from Pick List
             pick_list_items = frappe.get_all(
                 "Pick List Item",
                 filters={"parent": doc.pick_list},
-                fields=["item_code", "warehouse", "picked_qty", "storage"],
+                fields=["item_code", "warehouse", "picked_qty", "storage", "serial_and_batch_bundle"],
                 order_by="idx"
             )
 
-            # Set storage for each Stock Entry Detail item
+            # Set storage and serial numbers for each Stock Entry Detail item
             for idx, item in enumerate(doc.items):
-                # Set source storage from Pick List (if available and matches)
                 if idx < len(pick_list_items):
                     pl_item = pick_list_items[idx]
+
+                    # Set source storage from Pick List (if available and matches)
                     if not item.storage and pl_item.storage and item.s_warehouse:
                         item.storage = pl_item.storage
 
-                # Set target storage from Manufacturing Settings default_wip_storage
-                if not item.to_storage and item.t_warehouse and default_wip_storage:
-                    item.to_storage = default_wip_storage
+                    # Inherit serial/batch from PL SABB when PL used bundle mode
+                    if pl_item.serial_and_batch_bundle:
+                        if not item.serial_no:
+                            serial_nos = frappe.get_all(
+                                "Serial and Batch Entry",
+                                filters={"parent": pl_item.serial_and_batch_bundle, "serial_no": ("is", "set")},
+                                pluck="serial_no",
+                            )
+                            if serial_nos:
+                                item.serial_no = "\n".join(serial_nos)
+                                item.use_serial_batch_fields = 1
+
+                        if not item.batch_no:
+                            batch_no = frappe.db.get_value(
+                                "Serial and Batch Entry",
+                                {"parent": pl_item.serial_and_batch_bundle, "batch_no": ("is", "set")},
+                                "batch_no",
+                            )
+                            if batch_no:
+                                item.batch_no = batch_no
+                                item.use_serial_batch_fields = 1
+
+                # Set target storage: WO wip_storage > Manufacturing Settings default
+                if not item.to_storage and item.t_warehouse and wip_storage:
+                    item.to_storage = wip_storage
 
         elif doc.work_order:
             # Get storage from available stock (FIFO) for Work Order items
@@ -121,25 +155,22 @@ def set_default_storage(doc):
                     if storage:
                         item.storage = storage
 
-                # Set target storage from Manufacturing Settings default_wip_storage
-                if not item.to_storage and item.t_warehouse and default_wip_storage:
-                    item.to_storage = default_wip_storage
+                # Set target storage: WO wip_storage > Manufacturing Settings default
+                if not item.to_storage and item.t_warehouse and wip_storage:
+                    item.to_storage = wip_storage
 
     elif doc.purpose in ["Material Consumption for Manufacture", "Manufacture"]:
-        # For Material Consumption and Manufacture (Finish):
-        # - Raw materials come FROM WIP warehouse -> use default_wip_storage
-        # - Finished goods go TO FG warehouse -> use default_fg_storage
         for item in doc.items:
             is_finished = getattr(item, 'is_finished_item', 0)
 
             if is_finished:
-                # Finished item: target storage = default_fg_storage
-                if not item.to_storage and item.t_warehouse and default_fg_storage:
-                    item.to_storage = default_fg_storage
+                # Finished item: target storage from WO fg_storage > Manufacturing Settings
+                if not item.to_storage and item.t_warehouse and fg_storage:
+                    item.to_storage = fg_storage
             else:
-                # Raw material: source storage = default_wip_storage
-                if not item.storage and item.s_warehouse and default_wip_storage:
-                    item.storage = default_wip_storage
+                # Raw material: source storage from WO wip_storage > Manufacturing Settings
+                if not item.storage and item.s_warehouse and wip_storage:
+                    item.storage = wip_storage
 
 
 def validate_storage_fields(doc):

@@ -52,10 +52,13 @@ def validate_pick_list(doc, method):
 	"""Validate Pick List before submit.
 
 	For documents created from 2026 onwards:
-	- Batch No is mandatory for batch-tracked items
 	- Storage is mandatory for all items
+	- Batch No is mandatory for batch-tracked items
+	- Serial No is mandatory for serial-tracked items (from row field or SABB)
 	- Serial numbers must be available in the selected warehouse + storage
 	"""
+	from erpnext.stock.doctype.serial_no.serial_no import get_serial_nos
+
 	cutoff = getdate("2026-01-01")
 	if getdate(doc.creation) < cutoff:
 		return
@@ -75,17 +78,83 @@ def validate_pick_list(doc, method):
 			)
 
 		has_batch_no = frappe.get_cached_value("Item", row.item_code, "has_batch_no")
-		if has_batch_no and not row.batch_no:
+		if has_batch_no:
+			# Get batch_no from row field or from SABB entries
+			if row.batch_no:
+				batch_no = row.batch_no
+			elif row.serial_and_batch_bundle:
+				batch_no = frappe.db.get_value(
+					"Serial and Batch Entry",
+					{"parent": row.serial_and_batch_bundle, "batch_no": ("is", "set")},
+					"batch_no",
+				)
+			else:
+				batch_no = None
+
+			if not batch_no:
+				frappe.msgprint(
+					_("Row #{0}: Batch No is mandatory for item {1}").format(
+						row.idx, frappe.bold(row.item_code)
+					),
+					title=_("Missing Batch No"),
+					indicator="orange",
+					raise_exception=True,
+				)
+
+		has_serial_no = frappe.get_cached_value("Item", row.item_code, "has_serial_no")
+		if not has_serial_no:
+			continue
+
+		# Get serial numbers from row field or from SABB entries
+		if row.serial_no:
+			serial_nos = get_serial_nos(row.serial_no)
+		elif row.serial_and_batch_bundle:
+			serial_nos = frappe.get_all(
+				"Serial and Batch Entry",
+				filters={"parent": row.serial_and_batch_bundle, "serial_no": ("is", "set")},
+				pluck="serial_no",
+			)
+		else:
+			serial_nos = []
+
+		if not serial_nos:
 			frappe.msgprint(
-				_("Row #{0}: Batch No is mandatory for item {1}").format(
+				_("Row #{0}: Serial No is mandatory for item {1}").format(
 					row.idx, frappe.bold(row.item_code)
 				),
-				title=_("Missing Batch No"),
+				title=_("Missing Serial No"),
 				indicator="orange",
 				raise_exception=True,
 			)
+			continue
 
-	validate_serial_no_storage(doc)
+		# Validate serial numbers exist in selected warehouse + storage
+		if not row.get("storage"):
+			continue
+
+		valid_serial_nos = frappe.get_all(
+			"Serial No",
+			filters={
+				"name": ("in", serial_nos),
+				"warehouse": row.warehouse,
+				"storage": row.storage,
+			},
+			pluck="name",
+		)
+
+		invalid_serial_nos = set(serial_nos) - set(valid_serial_nos)
+		if invalid_serial_nos:
+			frappe.msgprint(
+				_("Row #{0}: Serial No {1} is not available in warehouse {2}, storage {3}.").format(
+					row.idx,
+					frappe.bold(", ".join(sorted(invalid_serial_nos))),
+					frappe.bold(row.warehouse),
+					frappe.bold(row.storage),
+				),
+				title=_("Incorrect Storage"),
+				indicator="orange",
+				raise_exception=True,
+			)
 
 
 def sync_sabb_storage(doc, method):
@@ -117,50 +186,3 @@ def sync_sabb_storage(doc, method):
 			""", {"storage": row.storage, "bundle": row.serial_and_batch_bundle})
 
 
-def validate_serial_no_storage(doc):
-	"""Validate that picked serial numbers are available in the selected warehouse + storage."""
-	from erpnext.stock.doctype.serial_no.serial_no import get_serial_nos
-
-	for row in doc.locations:
-		has_serial_no = frappe.get_cached_value("Item", row.item_code, "has_serial_no") if row.item_code else 0
-		if not has_serial_no:
-			continue
-
-		serial_nos = get_serial_nos(row.serial_no) if row.serial_no else []
-		if not serial_nos:
-			frappe.msgprint(
-				_("Row #{0}: Serial No is mandatory for item {1}").format(
-					row.idx, frappe.bold(row.item_code)
-				),
-				title=_("Missing Serial No"),
-				indicator="orange",
-				raise_exception=True,
-			)
-
-		# Validate serial numbers exist in selected warehouse + storage
-		if not row.get("storage"):
-			continue
-
-		valid_serial_nos = frappe.get_all(
-			"Serial No",
-			filters={
-				"name": ("in", serial_nos),
-				"warehouse": row.warehouse,
-				"storage": row.storage,
-			},
-			pluck="name",
-		)
-
-		invalid_serial_nos = set(serial_nos) - set(valid_serial_nos)
-		if invalid_serial_nos:
-			frappe.msgprint(
-				_("Row #{0}: Serial No {1} is not available in warehouse {2}, storage {3}.").format(
-					row.idx,
-					frappe.bold(", ".join(sorted(invalid_serial_nos))),
-					frappe.bold(row.warehouse),
-					frappe.bold(row.storage),
-				),
-				title=_("Incorrect Storage"),
-				indicator="orange",
-				raise_exception=True,
-			)
