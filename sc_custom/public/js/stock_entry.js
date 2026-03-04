@@ -1,6 +1,6 @@
 /**
  * Stock Entry customizations for SC Custom
- * Auto-populate Storage field from Pick List and Manufacturing Settings
+ * Auto-populate Storage field from Work Order, Pick List and Manufacturing Settings
  */
 
 frappe.ui.form.on('Stock Entry', {
@@ -30,24 +30,57 @@ frappe.ui.form.on('Stock Entry', {
 	}
 });
 
+/**
+ * Get resolved wip_storage and fg_storage:
+ * WO fields first, then Manufacturing Settings defaults as fallback.
+ * Returns Promise resolving to {wip_storage, fg_storage}
+ */
+function get_resolved_storage(frm) {
+	let promises = [
+		frappe.db.get_single_value('Manufacturing Settings', 'default_wip_storage'),
+		frappe.db.get_single_value('Manufacturing Settings', 'default_fg_storage')
+	];
+
+	if (frm.doc.work_order) {
+		promises.push(
+			frappe.db.get_value('Work Order', frm.doc.work_order, ['wip_storage', 'fg_storage'])
+		);
+	}
+
+	return Promise.all(promises).then(function(results) {
+		let default_wip = results[0];
+		let default_fg = results[1];
+		let wo_wip = '';
+		let wo_fg = '';
+
+		if (results[2] && results[2].message) {
+			wo_wip = results[2].message.wip_storage || '';
+			wo_fg = results[2].message.fg_storage || '';
+		}
+
+		return {
+			wip_storage: wo_wip || default_wip || '',
+			fg_storage: wo_fg || default_fg || ''
+		};
+	});
+}
+
 function copy_storage_from_pick_list(frm) {
 	if (!frm.doc.pick_list || !frm.doc.items || frm.doc.items.length === 0) {
 		return;
 	}
 
-	// Get default WIP storage and Pick List data in parallel
 	Promise.all([
-		frappe.db.get_single_value('Manufacturing Settings', 'default_wip_storage'),
+		get_resolved_storage(frm),
 		frappe.call({
 			method: 'sc_custom.api.pick_list_storage.get_pick_list_items_storage',
 			args: {
 				pick_list: frm.doc.pick_list
 			}
 		})
-	]).then(function([default_wip_storage, pick_list_response]) {
+	]).then(function([storage, pick_list_response]) {
 		let pick_list_items = pick_list_response.message || [];
-		let source_updated = 0;
-		let target_updated = 0;
+		let updated = false;
 
 		frm.doc.items.forEach(function(se_item, idx) {
 			let pl_item = pick_list_items[idx];
@@ -55,17 +88,17 @@ function copy_storage_from_pick_list(frm) {
 			// Set source storage from Pick List
 			if (!se_item.storage && pl_item && pl_item.storage && se_item.s_warehouse) {
 				frappe.model.set_value(se_item.doctype, se_item.name, 'storage', pl_item.storage);
-				source_updated++;
+				updated = true;
 			}
 
-			// Set target storage from Manufacturing Settings default
-			if (!se_item.to_storage && se_item.t_warehouse && default_wip_storage) {
-				frappe.model.set_value(se_item.doctype, se_item.name, 'to_storage', default_wip_storage);
-				target_updated++;
+			// Set target storage: WO wip_storage > Manufacturing Settings default
+			if (!se_item.to_storage && se_item.t_warehouse && storage.wip_storage) {
+				frappe.model.set_value(se_item.doctype, se_item.name, 'to_storage', storage.wip_storage);
+				updated = true;
 			}
 		});
 
-		if (source_updated > 0 || target_updated > 0) {
+		if (updated) {
 			frm.refresh_field('items');
 		}
 	});
@@ -76,26 +109,22 @@ function set_storage_for_manufacture(frm) {
 		return;
 	}
 
-	// Get default storage values from Manufacturing Settings
-	Promise.all([
-		frappe.db.get_single_value('Manufacturing Settings', 'default_wip_storage'),
-		frappe.db.get_single_value('Manufacturing Settings', 'default_fg_storage')
-	]).then(function([default_wip_storage, default_fg_storage]) {
+	get_resolved_storage(frm).then(function(storage) {
 		let updated = false;
 
 		frm.doc.items.forEach(function(item) {
 			let is_finished = item.is_finished_item || 0;
 
 			if (is_finished) {
-				// Finished item: target storage = default_fg_storage
-				if (!item.to_storage && item.t_warehouse && default_fg_storage) {
-					frappe.model.set_value(item.doctype, item.name, 'to_storage', default_fg_storage);
+				// Finished item: target storage from WO fg_storage > Manufacturing Settings
+				if (!item.to_storage && item.t_warehouse && storage.fg_storage) {
+					frappe.model.set_value(item.doctype, item.name, 'to_storage', storage.fg_storage);
 					updated = true;
 				}
 			} else {
-				// Raw material: source storage = default_wip_storage
-				if (!item.storage && item.s_warehouse && default_wip_storage) {
-					frappe.model.set_value(item.doctype, item.name, 'storage', default_wip_storage);
+				// Raw material: source storage from WO wip_storage > Manufacturing Settings
+				if (!item.storage && item.s_warehouse && storage.wip_storage) {
+					frappe.model.set_value(item.doctype, item.name, 'storage', storage.wip_storage);
 					updated = true;
 				}
 			}
@@ -120,8 +149,6 @@ function set_storage_from_work_order(frm) {
 		};
 	});
 
-	// Get available stock locations (warehouse + storage + batch/serial) and default WIP storage in parallel
-	// Pass work_order and purpose to prioritize Work Order source warehouses and exclude WIP warehouse
 	Promise.all([
 		frappe.call({
 			method: 'sc_custom.api.pick_list_storage.get_available_stock_for_items',
@@ -132,8 +159,8 @@ function set_storage_from_work_order(frm) {
 				purpose: frm.doc.purpose
 			}
 		}),
-		frappe.db.get_single_value('Manufacturing Settings', 'default_wip_storage')
-	]).then(function([stock_response, default_wip_storage]) {
+		get_resolved_storage(frm)
+	]).then(function([stock_response, storage]) {
 		let stock_allocations = stock_response.message || [];
 		let updated = false;
 
@@ -154,18 +181,14 @@ function set_storage_from_work_order(frm) {
 				}
 
 				// Handle batch/serial allocation using use_serial_batch_fields
-				// Serial and Batch Bundle will be created by standard ERPNext on submit
 				if (allocation.has_batch_no || allocation.has_serial_no) {
-					// Enable use_serial_batch_fields to use simple batch_no/serial_no fields
 					frappe.model.set_value(se_item.doctype, se_item.name, 'use_serial_batch_fields', 1);
 					updated = true;
 
-					// Set batch number if available
 					if (allocation.has_batch_no && allocation.batch_no) {
 						frappe.model.set_value(se_item.doctype, se_item.name, 'batch_no', allocation.batch_no);
 					}
 
-					// Set serial numbers if available (newline-separated)
 					if (allocation.has_serial_no && allocation.serial_nos && allocation.serial_nos.length > 0) {
 						let serial_no_str = allocation.serial_nos.join('\n');
 						frappe.model.set_value(se_item.doctype, se_item.name, 'serial_no', serial_no_str);
@@ -173,9 +196,9 @@ function set_storage_from_work_order(frm) {
 				}
 			}
 
-			// Set target storage from Manufacturing Settings default
-			if (!se_item.to_storage && se_item.t_warehouse && default_wip_storage) {
-				frappe.model.set_value(se_item.doctype, se_item.name, 'to_storage', default_wip_storage);
+			// Set target storage: WO wip_storage > Manufacturing Settings default
+			if (!se_item.to_storage && se_item.t_warehouse && storage.wip_storage) {
+				frappe.model.set_value(se_item.doctype, se_item.name, 'to_storage', storage.wip_storage);
 				updated = true;
 			}
 		});

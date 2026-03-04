@@ -86,6 +86,8 @@ frappe.ui.form.on('Pick List Item', {
 						// so async frappe.model.set_value won't complete before frm.save().
 						item.serial_and_batch_bundle = r.name;
 						item.use_serial_batch_fields = 0;
+						item.serial_no = '';
+						item.batch_no = '';
 						item.qty = qty / flt(item.conversion_factor || 1,
 							precision("conversion_factor", item));
 						item.stock_qty = item.qty * (item.conversion_factor || 1);
