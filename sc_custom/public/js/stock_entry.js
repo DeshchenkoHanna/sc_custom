@@ -4,6 +4,69 @@
  */
 
 frappe.ui.form.on('Stock Entry', {
+	setup: function(frm) {
+		// Storage query: filter by item_code + s_warehouse, show only storages with stock
+		frm.set_query("storage", "items", (frm, cdt, cdn) => {
+			const row = locals[cdt][cdn];
+			return {
+				query: "sc_custom.api.queries.get_storage",
+				filters: {
+					item_code: row.item_code,
+					warehouse: row.s_warehouse,
+				},
+			};
+		});
+
+		// Batch query: filter by item_code + warehouse + storage
+		frm.set_query("batch_no", "items", (frm, cdt, cdn) => {
+			const row = locals[cdt][cdn];
+			let filters = {
+				item_code: row.item_code,
+				warehouse: row.s_warehouse || row.t_warehouse,
+			};
+			if (row.storage) {
+				filters.storage = row.storage;
+				return {
+					query: "sc_custom.api.queries.get_batch_no",
+					filters: filters,
+				};
+			}
+			return {
+				query: "erpnext.controllers.queries.get_batch_no",
+				filters: filters,
+			};
+		});
+	},
+
+	before_submit: function(frm) {
+		if (frm._sc_skip_pl_warning || !frm.doc.pick_list) return;
+
+		frappe.validated = false;
+		frappe.call({
+			method: "sc_custom.doctype_events.stock_entry.check_ste_pl_differences",
+			args: { ste_name: frm.doc.name },
+			callback: (r) => {
+				if (r.message && r.message.length) {
+					let rows = r.message.map(d =>
+						`<li><b>${__("Row")} #${d.idx}</b> (${d.item_code}): ${d.diffs.join(", ")}</li>`
+					).join("");
+					let msg = `<p>${__("The following items differ from the Pick List")}:</p><ul>${rows}</ul>`
+						+ `<p>${__("Are you sure you want to submit?")}</p>`;
+
+					frappe.confirm(msg, () => {
+						frm._sc_skip_pl_warning = true;
+						frappe.validated = true;
+						frm.save('Submit');
+					});
+				} else {
+					frm._sc_skip_pl_warning = true;
+					frappe.validated = true;
+					frm.save('Submit');
+				}
+			},
+		});
+	},
+
 	refresh: function(frm) {
 		// Only run for new documents
 		if (!frm.doc.__islocal) {
@@ -109,7 +172,21 @@ function set_storage_for_manufacture(frm) {
 		return;
 	}
 
-	get_resolved_storage(frm).then(function(storage) {
+	let promises = [get_resolved_storage(frm)];
+
+	// Fetch transfer STE inward data if WO exists
+	if (frm.doc.work_order) {
+		promises.push(
+			frappe.call({
+				method: 'sc_custom.doctype_events.stock_entry.get_transfer_inward_items',
+				args: { work_order: frm.doc.work_order }
+			})
+		);
+	}
+
+	Promise.all(promises).then(function(results) {
+		let storage = results[0];
+		let transfer_items = (results[1] && results[1].message) || {};
 		let updated = false;
 
 		frm.doc.items.forEach(function(item) {
@@ -122,10 +199,29 @@ function set_storage_for_manufacture(frm) {
 					updated = true;
 				}
 			} else {
-				// Raw material: source storage from WO wip_storage > Manufacturing Settings
-				if (!item.storage && item.s_warehouse && storage.wip_storage) {
-					frappe.model.set_value(item.doctype, item.name, 'storage', storage.wip_storage);
-					updated = true;
+				let t_item = transfer_items[item.item_code];
+
+				// Storage: transfer STE to_storage > WO wip_storage > Manufacturing Settings
+				if (!item.storage && item.s_warehouse) {
+					let src_storage = (t_item && t_item.to_storage) || storage.wip_storage;
+					if (src_storage) {
+						frappe.model.set_value(item.doctype, item.name, 'storage', src_storage);
+						updated = true;
+					}
+				}
+
+				// Batch/serial from transfer STE
+				if (t_item) {
+					if (!item.batch_no && t_item.batch_no) {
+						frappe.model.set_value(item.doctype, item.name, 'batch_no', t_item.batch_no);
+						frappe.model.set_value(item.doctype, item.name, 'use_serial_batch_fields', 1);
+						updated = true;
+					}
+					if (!item.serial_no && t_item.serial_nos && t_item.serial_nos.length > 0) {
+						frappe.model.set_value(item.doctype, item.name, 'serial_no', t_item.serial_nos.join('\n'));
+						frappe.model.set_value(item.doctype, item.name, 'use_serial_batch_fields', 1);
+						updated = true;
+					}
 				}
 			}
 		});

@@ -1,4 +1,5 @@
-STORAGE_INHERITANCE_FEATURE.md
+# Planning / documentation files
+*.md
 
 # Byte-compiled files
 __pycache__/

@@ -33,15 +33,15 @@ def get_batch_no(doctype, txt, searchfield, start, page_len, filters):
 	# Get batches from SLE with storage filter (legacy path)
 	sle_batches = _get_batches_from_sle_with_storage(item_code, warehouse, storage, txt)
 
-	# Merge and deduplicate
+	# Merge and deduplicate — take max qty from either source (they track the same stock)
 	batches = {}
 	for batch in sle_batches + sabe_batches:
 		if batch[0] not in batches:
 			batches[batch[0]] = list(batch)
 		else:
-			batches[batch[0]][1] += batch[1]
+			batches[batch[0]][1] = max(batches[batch[0]][1], batch[1])
 
-	return [tuple(b) for b in batches.values() if b[1] > 0]
+	return [(b[0], f"Qty: {b[1]}") for b in batches.values() if b[1] > 0]
 
 
 def _get_batches_from_sabb_with_storage(item_code, warehouse, storage, txt=None):
@@ -73,6 +73,7 @@ def _get_batches_from_sabb_with_storage(item_code, warehouse, storage, txt=None)
 			AND sabb.storage = %(storage)s
 			AND sabb.docstatus = 1
 			AND sabb.is_cancelled = 0
+			AND sabb.voucher_type != 'Pick List'
 			AND b.disabled = 0
 			AND (b.expiry_date >= %(today)s OR b.expiry_date IS NULL)
 			{conditions}
@@ -157,6 +158,7 @@ def get_storage(doctype, txt, searchfield, start, page_len, filters):
 			AND sabe.warehouse = %(warehouse)s
 			AND sabb.docstatus = 1
 			AND sabb.is_cancelled = 0
+			AND sabb.voucher_type != 'Pick List'
 			AND sabb.storage IS NOT NULL
 			AND sabb.storage != ''
 			{txt_condition}
@@ -250,6 +252,7 @@ def get_auto_batch_nos_with_storage(item_code, warehouse, storage, qty, based_on
 			AND sabb.storage = %(storage)s
 			AND sabb.docstatus = 1
 			AND sabb.is_cancelled = 0
+			AND sabb.voucher_type != 'Pick List'
 			AND b.disabled = 0
 			AND (b.expiry_date >= %(today)s OR b.expiry_date IS NULL)
 		GROUP BY sabe.batch_no

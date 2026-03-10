@@ -4,7 +4,7 @@ Stock Entry Validations for SC Custom
 
 import frappe
 from frappe import _
-from frappe.utils import getdate
+from frappe.utils import cint, flt, getdate, today
 
 
 def get_fifo_storage_for_item(item_code, warehouse, required_qty):
@@ -54,6 +54,7 @@ def validate_stock_entry(doc, method=None):
     """Main validation handler for Stock Entry"""
     set_default_storage(doc)
     validate_storage_fields(doc)
+    validate_batch_serial_storage(doc)
 
 
 def set_default_storage(doc):
@@ -116,8 +117,10 @@ def set_default_storage(doc):
                     if not item.storage and pl_item.storage and item.s_warehouse:
                         item.storage = pl_item.storage
 
-                    # Inherit serial/batch from PL SABB when PL used bundle mode
-                    if pl_item.serial_and_batch_bundle:
+                    # Inherit serial/batch from PL SABB only on first creation.
+                    # On subsequent saves the user may have changed storage/batch/serial
+                    # manually — don't overwrite their changes.
+                    if doc.get("__islocal") and pl_item.serial_and_batch_bundle:
                         if not item.serial_no:
                             serial_nos = frappe.get_all(
                                 "Serial and Batch Entry",
@@ -129,9 +132,10 @@ def set_default_storage(doc):
                                 item.use_serial_batch_fields = 1
 
                         if not item.batch_no:
+                            sabb_source = item.serial_and_batch_bundle or pl_item.serial_and_batch_bundle
                             batch_no = frappe.db.get_value(
                                 "Serial and Batch Entry",
-                                {"parent": pl_item.serial_and_batch_bundle, "batch_no": ("is", "set")},
+                                {"parent": sabb_source, "batch_no": ("is", "set")},
                                 "batch_no",
                             )
                             if batch_no:
@@ -160,6 +164,12 @@ def set_default_storage(doc):
                     item.to_storage = wip_storage
 
     elif doc.purpose in ["Material Consumption for Manufacture", "Manufacture"]:
+        # On first creation, try to inherit storage/batch/serial from
+        # the inward side of "Material Transfer for Manufacture" STEs for this WO
+        transfer_items = {}
+        if doc.get("__islocal") and doc.work_order:
+            transfer_items = _get_transfer_inward_items(doc.work_order)
+
         for item in doc.items:
             is_finished = getattr(item, 'is_finished_item', 0)
 
@@ -168,9 +178,90 @@ def set_default_storage(doc):
                 if not item.to_storage and item.t_warehouse and fg_storage:
                     item.to_storage = fg_storage
             else:
-                # Raw material: source storage from WO wip_storage > Manufacturing Settings
-                if not item.storage and item.s_warehouse and wip_storage:
-                    item.storage = wip_storage
+                t_item = transfer_items.get(item.item_code)
+
+                # Storage: transfer STE to_storage > WO wip_storage > Manufacturing Settings
+                if not item.storage and item.s_warehouse:
+                    if t_item and t_item.get("to_storage"):
+                        item.storage = t_item["to_storage"]
+                    elif wip_storage:
+                        item.storage = wip_storage
+
+                # Batch/serial from transfer STE (only on first creation)
+                if doc.get("__islocal") and t_item:
+                    if not item.batch_no and t_item.get("batch_no"):
+                        item.batch_no = t_item["batch_no"]
+                        item.use_serial_batch_fields = 1
+                    if not item.serial_no and t_item.get("serial_nos"):
+                        item.serial_no = "\n".join(t_item["serial_nos"])
+                        item.use_serial_batch_fields = 1
+
+
+@frappe.whitelist()
+def get_transfer_inward_items(work_order):
+    """Whitelisted wrapper for _get_transfer_inward_items."""
+    return _get_transfer_inward_items(work_order)
+
+
+def _get_transfer_inward_items(work_order):
+    """Get inward (target) data from submitted Material Transfer for Manufacture STEs.
+
+    Returns dict keyed by item_code with to_storage, batch_no, serial_nos.
+    If multiple transfers exist for the same item, the latest STE wins.
+    """
+    transfer_stes = frappe.get_all(
+        "Stock Entry",
+        filters={
+            "work_order": work_order,
+            "purpose": "Material Transfer for Manufacture",
+            "docstatus": 1,
+        },
+        fields=["name"],
+        order_by="creation asc",
+    )
+
+    if not transfer_stes:
+        return {}
+
+    result = {}
+    for ste in transfer_stes:
+        items = frappe.get_all(
+            "Stock Entry Detail",
+            filters={"parent": ste.name},
+            fields=[
+                "item_code", "to_storage", "batch_no", "serial_no",
+                "serial_and_batch_bundle",
+            ],
+        )
+        for item in items:
+            batch_no = item.batch_no
+            serial_nos = []
+
+            # Get batch/serial from SABB if not on the row
+            if item.serial_and_batch_bundle:
+                if not batch_no:
+                    batch_no = frappe.db.get_value(
+                        "Serial and Batch Entry",
+                        {"parent": item.serial_and_batch_bundle, "batch_no": ("is", "set")},
+                        "batch_no",
+                    )
+                if not serial_nos:
+                    serial_nos = frappe.get_all(
+                        "Serial and Batch Entry",
+                        filters={"parent": item.serial_and_batch_bundle, "serial_no": ("is", "set")},
+                        pluck="serial_no",
+                    )
+
+            if item.serial_no and not serial_nos:
+                serial_nos = [s.strip() for s in item.serial_no.split("\n") if s.strip()]
+
+            result[item.item_code] = {
+                "to_storage": item.to_storage or "",
+                "batch_no": batch_no or "",
+                "serial_nos": serial_nos,
+            }
+
+    return result
 
 
 def validate_storage_fields(doc):
@@ -253,3 +344,229 @@ def validate_storage_fields(doc):
         #             ),
         #             title=_("Missing To Storage")
         #         )
+
+
+def validate_batch_serial_storage(doc):
+    """Validate that batch/serial numbers have sufficient qty in the specified storage.
+
+    Checks outward items (with s_warehouse + storage) to ensure the batch or serial
+    actually exists in that storage with enough quantity.
+    Only applies to documents with posting_date >= 2026-01-01.
+    """
+    if getdate(doc.posting_date) < getdate("2026-01-01"):
+        return
+
+    if not doc.items:
+        return
+
+    for item in doc.items:
+        # Only validate outward (source) side
+        if not item.s_warehouse or not item.storage:
+            continue
+
+        has_batch_no = frappe.get_cached_value("Item", item.item_code, "has_batch_no")
+        has_serial_no = frappe.get_cached_value("Item", item.item_code, "has_serial_no")
+
+        if not has_batch_no and not has_serial_no:
+            continue
+
+        # Get batch_no from row or from SABB
+        batch_no = item.batch_no
+        if not batch_no and item.serial_and_batch_bundle and has_batch_no:
+            batch_no = frappe.db.get_value(
+                "Serial and Batch Entry",
+                {"parent": item.serial_and_batch_bundle, "batch_no": ("is", "set")},
+                "batch_no",
+            )
+
+        # Validate batch + storage
+        if has_batch_no and batch_no:
+            available = _get_batch_qty_in_storage(
+                item.item_code, item.s_warehouse, item.storage, batch_no
+            )
+            required = flt(item.qty) * flt(item.conversion_factor or 1)
+            if available < required:
+                frappe.throw(
+                    _("Row #{0}: Batch {1} has only {2} qty available in Storage {3} "
+                      "(Warehouse: {4}), but {5} is required.").format(
+                        item.idx, frappe.bold(batch_no), available,
+                        frappe.bold(item.storage), item.s_warehouse, required
+                    ),
+                    title=_("Insufficient Batch Qty in Storage")
+                )
+
+        # Validate serial nos + storage
+        if has_serial_no:
+            serial_nos = []
+            if item.serial_no:
+                serial_nos = [s.strip() for s in item.serial_no.split("\n") if s.strip()]
+            elif item.serial_and_batch_bundle:
+                serial_nos = frappe.get_all(
+                    "Serial and Batch Entry",
+                    filters={"parent": item.serial_and_batch_bundle, "serial_no": ("is", "set")},
+                    pluck="serial_no",
+                )
+
+            if serial_nos:
+                wrong_storage = _get_serials_not_in_storage(
+                    serial_nos, item.s_warehouse, item.storage
+                )
+                if wrong_storage:
+                    frappe.throw(
+                        _("Row #{0}: Serial No(s) {1} are not in Storage {2} "
+                          "(Warehouse: {3}).").format(
+                            item.idx,
+                            frappe.bold(", ".join(wrong_storage[:5])),
+                            frappe.bold(item.storage),
+                            item.s_warehouse,
+                        ),
+                        title=_("Serial No Not in Storage")
+                    )
+
+
+def _get_batch_qty_in_storage(item_code, warehouse, storage, batch_no):
+    """Get available qty for a batch in a specific storage."""
+    # From SABB/SABE
+    sabb_qty = frappe.db.sql("""
+        SELECT IFNULL(SUM(sabe.qty), 0)
+        FROM `tabSerial and Batch Entry` sabe
+        JOIN `tabSerial and Batch Bundle` sabb ON sabe.parent = sabb.name
+        WHERE
+            sabb.item_code = %(item_code)s
+            AND sabe.warehouse = %(warehouse)s
+            AND sabb.storage = %(storage)s
+            AND sabe.batch_no = %(batch_no)s
+            AND sabb.docstatus = 1
+            AND sabb.is_cancelled = 0
+            AND sabb.voucher_type != 'Pick List'
+    """, {
+        "item_code": item_code,
+        "warehouse": warehouse,
+        "storage": storage,
+        "batch_no": batch_no,
+    })[0][0] or 0
+
+    # From SLE
+    sle_qty = frappe.db.sql("""
+        SELECT IFNULL(SUM(sle.actual_qty), 0)
+        FROM `tabStock Ledger Entry` sle
+        WHERE
+            sle.item_code = %(item_code)s
+            AND sle.warehouse = %(warehouse)s
+            AND sle.storage = %(storage)s
+            AND sle.batch_no = %(batch_no)s
+            AND sle.is_cancelled = 0
+    """, {
+        "item_code": item_code,
+        "warehouse": warehouse,
+        "storage": storage,
+        "batch_no": batch_no,
+    })[0][0] or 0
+
+    return flt(max(sabb_qty, sle_qty))
+
+
+def _get_serials_not_in_storage(serial_nos, warehouse, storage):
+    """Return serial numbers that are not in the specified warehouse+storage."""
+    if not serial_nos:
+        return []
+
+    existing = frappe.get_all(
+        "Serial No",
+        filters={
+            "name": ("in", serial_nos),
+            "warehouse": warehouse,
+            "storage": storage,
+        },
+        pluck="name",
+    )
+
+    return [sn for sn in serial_nos if sn not in existing]
+
+
+@frappe.whitelist()
+def check_ste_pl_differences(ste_name):
+    """Compare STE items with their Pick List source and return differences.
+
+    Returns list of dicts with idx and list of changed fields.
+    """
+    doc = frappe.get_doc("Stock Entry", ste_name)
+    if not doc.pick_list:
+        return []
+
+    pl_items = frappe.get_all(
+        "Pick List Item",
+        filters={"parent": doc.pick_list},
+        fields=["item_code", "warehouse", "storage", "batch_no", "serial_and_batch_bundle"],
+        order_by="idx",
+    )
+
+    differences = []
+    for idx, item in enumerate(doc.items):
+        if idx >= len(pl_items):
+            break
+
+        pl = pl_items[idx]
+        row_diffs = []
+
+        # Compare storage
+        if item.storage and pl.storage and item.storage != pl.storage:
+            row_diffs.append(_("Storage: {0} → {1}").format(pl.storage, item.storage))
+
+        # Compare batch_no
+        pl_batch = pl.batch_no
+        if not pl_batch and pl.serial_and_batch_bundle:
+            pl_batch = frappe.db.get_value(
+                "Serial and Batch Entry",
+                {"parent": pl.serial_and_batch_bundle, "batch_no": ("is", "set")},
+                "batch_no",
+            )
+
+        ste_batch = item.batch_no
+        if not ste_batch and item.serial_and_batch_bundle:
+            ste_batch = frappe.db.get_value(
+                "Serial and Batch Entry",
+                {"parent": item.serial_and_batch_bundle, "batch_no": ("is", "set")},
+                "batch_no",
+            )
+
+        if ste_batch and pl_batch and ste_batch != pl_batch:
+            row_diffs.append(_("Batch No: {0} → {1}").format(pl_batch, ste_batch))
+
+        # Compare serial nos
+        pl_serials = set()
+        if pl.serial_and_batch_bundle:
+            pl_serials = set(frappe.get_all(
+                "Serial and Batch Entry",
+                filters={"parent": pl.serial_and_batch_bundle, "serial_no": ("is", "set")},
+                pluck="serial_no",
+            ))
+
+        ste_serials = set()
+        if item.serial_no:
+            ste_serials = {s.strip() for s in item.serial_no.split("\n") if s.strip()}
+        elif item.serial_and_batch_bundle:
+            ste_serials = set(frappe.get_all(
+                "Serial and Batch Entry",
+                filters={"parent": item.serial_and_batch_bundle, "serial_no": ("is", "set")},
+                pluck="serial_no",
+            ))
+
+        if pl_serials and ste_serials and pl_serials != ste_serials:
+            added = ste_serials - pl_serials
+            removed = pl_serials - ste_serials
+            parts = []
+            if removed:
+                parts.append(_("removed: {0}").format(", ".join(list(removed)[:3])))
+            if added:
+                parts.append(_("added: {0}").format(", ".join(list(added)[:3])))
+            row_diffs.append(_("Serial Nos: {0}").format("; ".join(parts)))
+
+        if row_diffs:
+            differences.append({
+                "idx": item.idx,
+                "item_code": item.item_code,
+                "diffs": row_diffs,
+            })
+
+    return differences
