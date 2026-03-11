@@ -57,6 +57,21 @@ def validate_stock_entry(doc, method=None):
     validate_batch_serial_storage(doc)
 
 
+def before_submit_stock_entry(doc, method=None):
+    """Monkey-patch create_serial_batch_bundle to inject storage into auto-created SABBs.
+
+    Standard ERPNext creates SABBs on submit (via make_bundle_using_old_serial_batch_fields)
+    but doesn't know about storage. We wrap create_serial_batch_bundle so that
+    storage is included in the bundle_details dict before SABB creation.
+    """
+    _patch_create_serial_batch_bundle(doc)
+
+
+def on_submit_stock_entry(doc, method=None):
+    """Fallback: set storage on any SABBs that still don't have it after submit."""
+    set_storage_on_bundles(doc)
+
+
 def set_default_storage(doc):
     """
     Set default storage locations from Manufacturing Settings
@@ -262,6 +277,64 @@ def _get_transfer_inward_items(work_order):
             }
 
     return result
+
+
+def _patch_create_serial_batch_bundle(doc):
+    """Wrap doc.create_serial_batch_bundle to inject storage into bundle_details."""
+    original_create = doc.create_serial_batch_bundle.__func__
+
+    def patched_create(self, bundle_details, row):
+        # Inject storage based on direction
+        if row.s_warehouse and row.storage:
+            bundle_details["storage"] = row.storage
+        elif row.t_warehouse and row.to_storage:
+            bundle_details["storage"] = row.to_storage
+        return original_create(self, bundle_details, row)
+
+    import types
+    doc.create_serial_batch_bundle = types.MethodType(patched_create, doc)
+
+
+def set_storage_on_bundles(doc):
+    """Set storage on SABBs that were auto-created without it.
+
+    For each STE item that has a SABB but the SABB has no storage,
+    set storage from the row:
+    - Outward (s_warehouse): use item.storage
+    - Inward (t_warehouse only): use item.to_storage
+    """
+    if not doc.items:
+        return
+
+    for item in doc.items:
+        if not item.serial_and_batch_bundle:
+            continue
+
+        # Determine which storage to use based on direction
+        if item.s_warehouse:
+            storage = item.storage
+        else:
+            storage = item.to_storage
+
+        if not storage:
+            continue
+
+        # Check if SABB already has storage set
+        current_storage = frappe.db.get_value(
+            "Serial and Batch Bundle", item.serial_and_batch_bundle, "storage"
+        )
+        if current_storage:
+            continue
+
+        # Set storage on SABB and its entries
+        frappe.db.set_value(
+            "Serial and Batch Bundle", item.serial_and_batch_bundle, "storage", storage
+        )
+        frappe.db.sql("""
+            UPDATE `tabSerial and Batch Entry`
+            SET storage = %(storage)s
+            WHERE parent = %(bundle)s
+        """, {"storage": storage, "bundle": item.serial_and_batch_bundle})
 
 
 def validate_storage_fields(doc):

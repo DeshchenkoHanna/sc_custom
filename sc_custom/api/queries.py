@@ -126,7 +126,8 @@ def get_storage(doctype, txt, searchfield, start, page_len, filters):
 	"""Get available storage locations with stock for an item in a warehouse.
 
 	Returns storages from both SABB/SABE and SLE sources, with available qty.
-	Used as set_query for the storage field in Pick List Item.
+	Used as set_query for the storage field in Pick List Item and outward SABB dialog.
+	Inward SABB dialog uses a plain is_group=0 filter instead (no stock required).
 	"""
 	item_code = filters.get("item_code") if isinstance(filters, dict) else None
 	warehouse = filters.get("warehouse") if isinstance(filters, dict) else None

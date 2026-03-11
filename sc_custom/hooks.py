@@ -147,7 +147,9 @@ override_doctype_class = {
 
 doc_events = {
     "Stock Entry": {
-        "validate": "sc_custom.doctype_events.stock_entry.validate_stock_entry"
+        "validate": "sc_custom.doctype_events.stock_entry.validate_stock_entry",
+        "before_submit": "sc_custom.doctype_events.stock_entry.before_submit_stock_entry",
+        "on_submit": "sc_custom.doctype_events.stock_entry.on_submit_stock_entry",
     },
     "Delivery Note": {
         "validate": "sc_custom.doctype_events.delivery_note.validate_delivery_note"
