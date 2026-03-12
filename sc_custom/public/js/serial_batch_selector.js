@@ -5,16 +5,26 @@
  * When storage is selected, batch/serial queries and auto-fetch are
  * filtered by storage. The created SABB gets storage set on it.
  *
- * Handles both Outward (source storage) and Inward (target to_storage)
- * directions via type_of_transaction on the item.
+ * Storage field mapping per child doctype:
+ *   Stock Entry Detail → outward: 'storage', inward: 'to_storage'
+ *   All other doctypes → both directions use 'storage'
  */
+
+// Maps child doctype to its storage fieldnames per direction.
+// Only Stock Entry Detail uses separate fields for inward/outward.
+// All other doctypes (Purchase Receipt Item, Purchase Invoice Item,
+// Delivery Note Item, Sales Invoice Item, Pick List Item) use 'storage'
+// for both directions.
+const STORAGE_FIELD_MAP = {
+	'Stock Entry Detail': { outward: 'storage', inward: 'to_storage' },
+};
 
 const OriginalSerialBatchPackageSelector = erpnext.SerialBatchPackageSelector;
 
 erpnext.SerialBatchPackageSelector = class extends OriginalSerialBatchPackageSelector {
 
 	/**
-	 * Detect if this dialog is for an inward (target) transaction.
+	 * Detect if this dialog is for an inward transaction.
 	 * Uses the same type_of_transaction that standard ERPNext sets.
 	 */
 	_is_inward() {
@@ -22,26 +32,29 @@ erpnext.SerialBatchPackageSelector = class extends OriginalSerialBatchPackageSel
 	}
 
 	/**
-	 * Get the current storage value from the item row,
-	 * respecting direction (storage for outward, to_storage for inward).
+	 * Return the correct storage fieldname for this item's doctype and direction.
+	 * Falls back to 'storage' for doctypes not in STORAGE_FIELD_MAP.
 	 */
-	_get_item_storage() {
-		if (this._is_inward()) {
-			return this.item.to_storage || this.item.storage || '';
+	_get_storage_fieldname() {
+		let map = STORAGE_FIELD_MAP[this.item?.doctype];
+		if (map) {
+			return this._is_inward() ? map.inward : map.outward;
 		}
-		return this.item.storage || '';
+		return 'storage';
 	}
 
 	/**
-	 * Set storage back on the item row after dialog confirms,
-	 * writing to the correct field based on direction.
+	 * Get the current storage value from the item row.
+	 */
+	_get_item_storage() {
+		return this.item[this._get_storage_fieldname()] || '';
+	}
+
+	/**
+	 * Set storage back on the item row after dialog confirms.
 	 */
 	_set_item_storage(value) {
-		if (this._is_inward()) {
-			this.item.to_storage = value;
-		} else {
-			this.item.storage = value;
-		}
+		this.item[this._get_storage_fieldname()] = value;
 	}
 
 	/**
@@ -137,44 +150,57 @@ erpnext.SerialBatchPackageSelector = class extends OriginalSerialBatchPackageSel
 
 	_patch_entries_table_queries() {
 		let entries_field = this.dialog?.fields_dict?.entries;
-		if (!entries_field) return;
+		if (!entries_field?.grid) return;
 
+		// Must use grid.get_field() — Frappe syncs get_query from grid.fieldinfo
+		// to each row control at render time (grid_row.js: field.get_query =
+		// this.grid.get_field(fieldname).get_query). Patching df.fields directly
+		// does not propagate because df may be copied per control.
 		let table_fields = entries_field.df.fields;
-		for (let f of table_fields) {
-			if (f.fieldname === 'batch_no') {
-				let original_get_query = f.get_query;
-				f.get_query = () => {
-					let storage = this.dialog?.get_value("storage") || this._get_item_storage();
-					if (storage) {
-						return {
-							query: "sc_custom.api.queries.get_batch_no",
-							filters: {
-								item_code: this.item.item_code,
-								warehouse: this.dialog?.get_value("warehouse") || this.item.s_warehouse || this.item.t_warehouse || this.item.warehouse,
-								storage: storage,
-							}
-						};
-					}
+
+		let batch_field = table_fields.find(f => f.fieldname === 'batch_no');
+		if (batch_field) {
+			let original_get_query = batch_field.get_query;
+			entries_field.grid.get_field('batch_no').get_query = () => {
+				// For inward (receipt, manufacture FG): do not filter by storage —
+				// the batch may be new or not yet in any warehouse/storage.
+				// Delegate to the standard query which handles is_inward correctly.
+				if (this._is_inward()) {
 					return original_get_query ? original_get_query() : {};
-				};
-			}
-			if (f.fieldname === 'serial_no') {
-				let original_get_query = f.get_query;
-				f.get_query = () => {
-					let storage = this.dialog?.get_value("storage") || this._get_item_storage();
-					if (storage) {
-						return {
-							query: "sc_custom.api.queries.get_serial_no",
-							filters: {
-								item_code: this.item.item_code,
-								warehouse: this.dialog?.get_value("warehouse") || this.item.warehouse,
-								storage: storage,
-							}
-						};
-					}
-					return original_get_query ? original_get_query() : {};
-				};
-			}
+				}
+				// For outward: filter by warehouse + storage when storage is selected.
+				let storage = this.dialog?.get_value("storage") || this._get_item_storage();
+				if (storage) {
+					return {
+						query: "sc_custom.api.queries.get_batch_no",
+						filters: {
+							item_code: this.item.item_code,
+							warehouse: this.dialog?.get_value("warehouse") || this.item.s_warehouse || this.item.t_warehouse || this.item.warehouse,
+							storage: storage,
+						}
+					};
+				}
+				return original_get_query ? original_get_query() : {};
+			};
+		}
+
+		let serial_field = table_fields.find(f => f.fieldname === 'serial_no');
+		if (serial_field) {
+			let original_get_query = serial_field.get_query;
+			entries_field.grid.get_field('serial_no').get_query = () => {
+				let storage = this.dialog?.get_value("storage") || this._get_item_storage();
+				if (storage) {
+					return {
+						query: "sc_custom.api.queries.get_serial_no",
+						filters: {
+							item_code: this.item.item_code,
+							warehouse: this.dialog?.get_value("warehouse") || this.item.warehouse,
+							storage: storage,
+						}
+					};
+				}
+				return original_get_query ? original_get_query() : {};
+			};
 		}
 	}
 
@@ -275,8 +301,7 @@ erpnext.SerialBatchPackageSelector = class extends OriginalSerialBatchPackageSel
 		}
 
 		// Phase 9 monkey-patch (patched_create_serial_batch_no_ledgers) reads storage
-		// from child_row.storage. For outward this.item.storage is already correct.
-		// For inward the value lives in this.item.to_storage, so we normalise here.
+		// from child_row.storage. Temporarily normalise to 'storage' for all doctypes.
 		this.item.storage = storage;
 
 		frappe.call({
@@ -290,13 +315,13 @@ erpnext.SerialBatchPackageSelector = class extends OriginalSerialBatchPackageSel
 		}).then((r) => {
 			frappe.run_serially([
 				() => {
-					// Write storage to the correct item field based on direction.
-					// _set_item_storage restores to_storage for inward / storage for outward.
+					// Write storage to the correct item field based on doctype + direction.
 					this._set_item_storage(storage);
-					// For inward: we temporarily set item.storage above for Phase 9.
-					// Clear it now so only to_storage is set on the row — storage is
-					// the source field and must be empty for receiving transactions.
-					if (this._is_inward()) {
+					// Clear the temporary 'storage' field only if the actual inward field
+					// is different (i.e. Stock Entry Detail where inward = 'to_storage').
+					// For doctypes where 'storage' IS the inward field (PRE, PI, DN return,
+					// SI return) we must NOT clear it — it was just correctly set above.
+					if (this._is_inward() && this._get_storage_fieldname() !== 'storage') {
 						this.item.storage = '';
 					}
 					this.callback && this.callback(r.message);

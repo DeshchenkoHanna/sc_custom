@@ -20,6 +20,23 @@ frappe.ui.form.on('Stock Entry', {
 		// Batch query: filter by item_code + warehouse + storage
 		frm.set_query("batch_no", "items", (frm, cdt, cdn) => {
 			const row = locals[cdt][cdn];
+			// In set_query callbacks Frappe passes (doc, cdt, cdn) — frm IS the doc
+			const is_inward = frm.purpose === "Material Receipt" ||
+				(frm.purpose === "Manufacture" && row.is_finished_item);
+
+			if (is_inward) {
+				// For inward: show all batches including new ones not yet in stock
+				return {
+					query: "erpnext.controllers.queries.get_batch_no",
+					filters: {
+						item_code: row.item_code,
+						warehouse: row.t_warehouse,
+						is_inward: 1,
+					},
+				};
+			}
+
+			// For outward: filter by warehouse + storage when storage is selected
 			let filters = {
 				item_code: row.item_code,
 				warehouse: row.s_warehouse || row.t_warehouse,

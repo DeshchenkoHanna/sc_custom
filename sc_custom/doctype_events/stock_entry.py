@@ -54,6 +54,7 @@ def validate_stock_entry(doc, method=None):
     """Main validation handler for Stock Entry"""
     set_default_storage(doc)
     validate_storage_fields(doc)
+    validate_serial_batch_fields_mismatch(doc)
     validate_batch_serial_storage(doc)
 
 
@@ -417,6 +418,49 @@ def validate_storage_fields(doc):
         #             ),
         #             title=_("Missing To Storage")
         #         )
+
+
+def validate_serial_batch_fields_mismatch(doc):
+    """Validate that serial_no/batch_no fields are only filled for items that support them.
+
+    Prevents confusing errors on submit when a user accidentally enters a serial/batch
+    number on an item that doesn't have has_serial_no/has_batch_no enabled.
+    """
+    if not doc.items:
+        return
+
+    for item in doc.items:
+        if not item.item_code:
+            continue
+
+        if not item.serial_no and not item.batch_no:
+            continue
+
+        item_details = frappe.get_cached_value(
+            "Item", item.item_code, ["has_serial_no", "has_batch_no"], as_dict=True
+        )
+        if not item_details:
+            continue
+
+        if item.serial_no and not item_details.has_serial_no:
+            frappe.throw(
+                _("Row #{0}: Item {1} does not have Serial No tracking enabled, "
+                  "but serial_no field contains '{2}'. Clear the field or enable "
+                  "'Has Serial No' on the Item master.").format(
+                    item.idx, frappe.bold(item.item_code), item.serial_no
+                ),
+                title=_("Invalid Serial No Field")
+            )
+
+        if item.batch_no and not item_details.has_batch_no:
+            frappe.throw(
+                _("Row #{0}: Item {1} does not have Batch No tracking enabled, "
+                  "but batch_no field contains '{2}'. Clear the field or enable "
+                  "'Has Batch No' on the Item master.").format(
+                    item.idx, frappe.bold(item.item_code), item.batch_no
+                ),
+                title=_("Invalid Batch No Field")
+            )
 
 
 def validate_batch_serial_storage(doc):

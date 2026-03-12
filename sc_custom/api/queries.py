@@ -15,11 +15,18 @@ def get_batch_no(doctype, txt, searchfield, start, page_len, filters):
 	Extends the standard get_batch_no to filter by storage when provided.
 	Falls back to the standard query when no storage filter is set.
 	"""
+	# Use get (not pop) so is_inward stays in filters for the standard query,
+	# which needs it to include empty batches for inward transactions.
+	is_inward = cint(filters.get("is_inward", 0)) if isinstance(filters, dict) else 0
 	storage = filters.pop("storage", None) if isinstance(filters, dict) else None
 
-	if not storage:
+	if not storage or is_inward:
 		from erpnext.controllers.queries import get_batch_no as standard_get_batch_no
 		return standard_get_batch_no(doctype, txt, searchfield, start, page_len, filters)
+
+	# Outward with storage: remove is_inward before custom processing
+	if isinstance(filters, dict):
+		filters.pop("is_inward", None)
 
 	item_code = filters.get("item_code")
 	warehouse = filters.get("warehouse")
