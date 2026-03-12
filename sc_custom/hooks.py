@@ -170,6 +170,9 @@ doc_events = {
         "validate": "sc_custom.doctype_events.pick_list.clean_stale_sabb",
         "before_submit": "sc_custom.doctype_events.pick_list.validate_pick_list",
         "on_submit": "sc_custom.doctype_events.pick_list.sync_sabb_storage"
+    },
+    "Serial and Batch Bundle": {
+        "validate": "sc_custom.doctype_events.serial_batch_bundle.validate_serial_batch_bundle"
     }
 }
 

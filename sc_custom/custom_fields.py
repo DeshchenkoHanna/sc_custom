@@ -74,7 +74,7 @@ def create_sc_custom_fields():
                 "fieldtype": "Link",
                 "options": "Storage",
                 "insert_after": "warehouse",
-                "reqd": 1,
+                "reqd": 0,
                 "translatable": 0
             }
         ],
