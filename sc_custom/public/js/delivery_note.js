@@ -4,6 +4,19 @@
  */
 
 frappe.ui.form.on('Delivery Note', {
+	setup: function(frm) {
+		frm.set_query("storage", "items", (frm, cdt, cdn) => {
+			const row = locals[cdt][cdn];
+			return {
+				query: "sc_custom.api.queries.get_storage",
+				filters: {
+					item_code: row.item_code,
+					warehouse: row.warehouse,
+				},
+			};
+		});
+	},
+
 	refresh: function(frm) {
 		// Populate default_storage for items when form loads
 		if (frm.doc.items && frm.doc.items.length > 0) {
