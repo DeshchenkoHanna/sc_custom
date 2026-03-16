@@ -106,6 +106,8 @@ frappe.ui.form.on('Stock Entry', {
 		} else if (frm.doc.purpose === 'Material Consumption for Manufacture' || frm.doc.purpose === 'Manufacture') {
 			// Set storage from Manufacturing Settings
 			set_storage_for_manufacture(frm);
+		} else if (frm.doc.purpose === 'Send to Subcontractor' && frm.doc.subcontracting_order) {
+			set_storage_from_subcontracting_order(frm);
 		}
 	}
 });
@@ -320,4 +322,28 @@ function set_storage_from_work_order(frm) {
 			frm.refresh_field('items');
 		}
 	});
+}
+
+function set_storage_from_subcontracting_order(frm) {
+	if (!frm.doc.subcontracting_order || !frm.doc.items || frm.doc.items.length === 0) {
+		return;
+	}
+
+	frappe.db.get_value('Subcontracting Order', frm.doc.subcontracting_order, 'supplier_storage')
+		.then(r => {
+			let supplier_storage = r && r.message && r.message.supplier_storage;
+			if (!supplier_storage) return;
+
+			let updated = false;
+			frm.doc.items.forEach(function(item) {
+				if (!item.to_storage && item.t_warehouse) {
+					frappe.model.set_value(item.doctype, item.name, 'to_storage', supplier_storage);
+					updated = true;
+				}
+			});
+
+			if (updated) {
+				frm.refresh_field('items');
+			}
+		});
 }

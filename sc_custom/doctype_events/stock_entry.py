@@ -94,9 +94,22 @@ def set_default_storage(doc):
         "Material Transfer",
         "Material Transfer for Manufacture",
         "Material Consumption for Manufacture",
-        "Manufacture"
+        "Manufacture",
+        "Send to Subcontractor",
     ]
     if doc.purpose not in supported_purposes:
+        return
+
+    # Send to Subcontractor: set to_storage from SCO's supplier_storage
+    if doc.purpose == "Send to Subcontractor":
+        if doc.subcontracting_order:
+            supplier_storage = frappe.db.get_value(
+                "Subcontracting Order", doc.subcontracting_order, "supplier_storage"
+            )
+            if supplier_storage:
+                for item in doc.items:
+                    if not item.to_storage and item.t_warehouse:
+                        item.to_storage = supplier_storage
         return
 
     # Get default storage values from Manufacturing Settings

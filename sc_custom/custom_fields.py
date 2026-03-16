@@ -97,6 +97,16 @@ def create_sc_custom_fields():
                 "insert_after": "warehouse",
                 "translatable": 0
             }
+        ],
+        "Subcontracting Order": [
+            {
+                "fieldname": "supplier_storage",
+                "label": "Supplier Storage",
+                "fieldtype": "Link",
+                "options": "Storage",
+                "insert_after": "supplier_warehouse",
+                "translatable": 0
+            }
         ]
     }
 

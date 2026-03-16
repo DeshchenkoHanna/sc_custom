@@ -173,6 +173,10 @@ doc_events = {
     },
     "Serial and Batch Bundle": {
         "validate": "sc_custom.doctype_events.serial_batch_bundle.validate_serial_batch_bundle"
+    },
+    "Subcontracting Receipt": {
+        "validate": "sc_custom.doctype_events.subcontracting_receipt.validate_subcontracting_receipt",
+        "before_submit": "sc_custom.doctype_events.subcontracting_receipt.before_submit_subcontracting_receipt"
     }
 }
 
@@ -190,7 +194,8 @@ fixtures = [
                     "Serial No-storage",
                     "Serial and Batch Bundle-storage",
                     "Serial and Batch Entry-storage",
-                    "Stock Reservation Entry-storage"
+                    "Stock Reservation Entry-storage",
+                    "Subcontracting Order-supplier_storage"
                 ]
             ]
         ]
