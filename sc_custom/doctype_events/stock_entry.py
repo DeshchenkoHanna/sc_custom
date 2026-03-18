@@ -321,7 +321,12 @@ def set_storage_on_bundles(doc):
         return
 
     for item in doc.items:
-        if not item.serial_and_batch_bundle:
+        # Reload from DB — auto-created bundles are set via db_set during
+        # update_stock_ledger, which doesn't update the in-memory doc
+        bundle = item.serial_and_batch_bundle or frappe.db.get_value(
+            item.doctype, item.name, "serial_and_batch_bundle"
+        )
+        if not bundle:
             continue
 
         # Determine which storage to use based on direction
@@ -333,22 +338,21 @@ def set_storage_on_bundles(doc):
         if not storage:
             continue
 
-        # Check if SABB already has storage set
+        # Set storage on SABB header if missing
         current_storage = frappe.db.get_value(
-            "Serial and Batch Bundle", item.serial_and_batch_bundle, "storage"
+            "Serial and Batch Bundle", bundle, "storage"
         )
-        if current_storage:
-            continue
+        if not current_storage:
+            frappe.db.set_value(
+                "Serial and Batch Bundle", bundle, "storage", storage
+            )
 
-        # Set storage on SABB and its entries
-        frappe.db.set_value(
-            "Serial and Batch Bundle", item.serial_and_batch_bundle, "storage", storage
-        )
+        # Always sync SABE entries — header may have storage but entries may not
         frappe.db.sql("""
             UPDATE `tabSerial and Batch Entry`
             SET storage = %(storage)s
-            WHERE parent = %(bundle)s
-        """, {"storage": storage, "bundle": item.serial_and_batch_bundle})
+            WHERE parent = %(bundle)s AND (storage IS NULL OR storage = '')
+        """, {"storage": storage, "bundle": bundle})
 
 
 def validate_storage_fields(doc):
@@ -555,36 +559,22 @@ def validate_batch_serial_storage(doc):
 
 
 def _get_batch_qty_in_storage(item_code, warehouse, storage, batch_no):
-    """Get available qty for a batch in a specific storage."""
-    # From SABB/SABE
-    sabb_qty = frappe.db.sql("""
-        SELECT IFNULL(SUM(sabe.qty), 0)
-        FROM `tabSerial and Batch Entry` sabe
-        JOIN `tabSerial and Batch Bundle` sabb ON sabe.parent = sabb.name
-        WHERE
-            sabb.item_code = %(item_code)s
-            AND sabe.warehouse = %(warehouse)s
-            AND sabb.storage = %(storage)s
-            AND sabe.batch_no = %(batch_no)s
-            AND sabb.docstatus = 1
-            AND sabb.is_cancelled = 0
-            AND sabb.voucher_type != 'Pick List'
-    """, {
-        "item_code": item_code,
-        "warehouse": warehouse,
-        "storage": storage,
-        "batch_no": batch_no,
-    })[0][0] or 0
+    """Get available qty for a batch in a specific storage.
 
-    # From SLE
-    sle_qty = frappe.db.sql("""
+    Joins SLE (source of storage) with SABB/SABE (source of batch_no)
+    via serial_and_batch_bundle link, since SLE may have batch_no=NULL
+    and SABB may have storage=NULL in modern ERPNext.
+    """
+    qty = frappe.db.sql("""
         SELECT IFNULL(SUM(sle.actual_qty), 0)
         FROM `tabStock Ledger Entry` sle
+        JOIN `tabSerial and Batch Bundle` sabb ON sle.serial_and_batch_bundle = sabb.name
+        JOIN `tabSerial and Batch Entry` sabe ON sabe.parent = sabb.name
         WHERE
             sle.item_code = %(item_code)s
             AND sle.warehouse = %(warehouse)s
             AND sle.storage = %(storage)s
-            AND sle.batch_no = %(batch_no)s
+            AND sabe.batch_no = %(batch_no)s
             AND sle.is_cancelled = 0
     """, {
         "item_code": item_code,
@@ -593,7 +583,7 @@ def _get_batch_qty_in_storage(item_code, warehouse, storage, batch_no):
         "batch_no": batch_no,
     })[0][0] or 0
 
-    return flt(max(sabb_qty, sle_qty))
+    return flt(qty)
 
 
 def _get_serials_not_in_storage(serial_nos, warehouse, storage):

@@ -52,7 +52,7 @@ def get_batch_no(doctype, txt, searchfield, start, page_len, filters):
 
 
 def _get_batches_from_sabb_with_storage(item_code, warehouse, storage, txt=None):
-	"""Get batches from Serial and Batch Bundle filtered by storage."""
+	"""Get batches via SLE (storage) → SABB → SABE (batch_no) join."""
 	conditions = ""
 	values = {
 		"item_code": item_code,
@@ -61,7 +61,7 @@ def _get_batches_from_sabb_with_storage(item_code, warehouse, storage, txt=None)
 	}
 
 	if warehouse:
-		conditions += " AND sabe.warehouse = %(warehouse)s"
+		conditions += " AND sle.warehouse = %(warehouse)s"
 		values["warehouse"] = warehouse
 
 	if txt:
@@ -71,22 +71,21 @@ def _get_batches_from_sabb_with_storage(item_code, warehouse, storage, txt=None)
 	return frappe.db.sql("""
 		SELECT
 			sabe.batch_no,
-			SUM(sabe.qty) as qty
-		FROM `tabSerial and Batch Entry` sabe
-		JOIN `tabSerial and Batch Bundle` sabb ON sabe.parent = sabb.name
+			SUM(sle.actual_qty) as qty
+		FROM `tabStock Ledger Entry` sle
+		JOIN `tabSerial and Batch Bundle` sabb ON sle.serial_and_batch_bundle = sabb.name
+		JOIN `tabSerial and Batch Entry` sabe ON sabe.parent = sabb.name
 		JOIN `tabBatch` b ON b.name = sabe.batch_no
 		WHERE
-			sabb.item_code = %(item_code)s
-			AND sabb.storage = %(storage)s
-			AND sabb.docstatus = 1
-			AND sabb.is_cancelled = 0
-			AND sabb.voucher_type != 'Pick List'
+			sle.item_code = %(item_code)s
+			AND sle.storage = %(storage)s
+			AND sle.is_cancelled = 0
 			AND b.disabled = 0
 			AND (b.expiry_date >= %(today)s OR b.expiry_date IS NULL)
 			{conditions}
 		GROUP BY sabe.batch_no
-		HAVING SUM(sabe.qty) > 0
-		ORDER BY MIN(sabb.creation)
+		HAVING SUM(sle.actual_qty) > 0
+		ORDER BY MIN(sle.posting_date), MIN(sle.posting_time)
 	""".format(conditions=conditions), values, as_list=True) or []
 
 
@@ -240,31 +239,30 @@ def get_auto_batch_nos_with_storage(item_code, warehouse, storage, qty, based_on
 		"today": today(),
 	}
 
-	# Get batches from SABB/SABE with storage
-	order_by = "MIN(sabb.creation)"
+	# Get batches via SLE (storage) → SABB → SABE (batch_no) join
+	order_by = "MIN(sle.posting_date), MIN(sle.posting_time)"
 	if based_on == "LIFO":
-		order_by = "MAX(sabb.creation) DESC"
+		order_by = "MAX(sle.posting_date) DESC, MAX(sle.posting_time) DESC"
 	elif based_on == "Expiry":
 		order_by = "b.expiry_date"
 
 	batches = frappe.db.sql("""
 		SELECT
 			sabe.batch_no,
-			SUM(sabe.qty) as qty
-		FROM `tabSerial and Batch Entry` sabe
-		JOIN `tabSerial and Batch Bundle` sabb ON sabe.parent = sabb.name
+			SUM(sle.actual_qty) as qty
+		FROM `tabStock Ledger Entry` sle
+		JOIN `tabSerial and Batch Bundle` sabb ON sle.serial_and_batch_bundle = sabb.name
+		JOIN `tabSerial and Batch Entry` sabe ON sabe.parent = sabb.name
 		JOIN `tabBatch` b ON b.name = sabe.batch_no
 		WHERE
-			sabb.item_code = %(item_code)s
-			AND sabe.warehouse = %(warehouse)s
-			AND sabb.storage = %(storage)s
-			AND sabb.docstatus = 1
-			AND sabb.is_cancelled = 0
-			AND sabb.voucher_type != 'Pick List'
+			sle.item_code = %(item_code)s
+			AND sle.warehouse = %(warehouse)s
+			AND sle.storage = %(storage)s
+			AND sle.is_cancelled = 0
 			AND b.disabled = 0
 			AND (b.expiry_date >= %(today)s OR b.expiry_date IS NULL)
 		GROUP BY sabe.batch_no
-		HAVING SUM(sabe.qty) > 0
+		HAVING SUM(sle.actual_qty) > 0
 		ORDER BY {order_by}
 	""".format(order_by=order_by), values, as_dict=True) or []
 

@@ -208,21 +208,25 @@ def _get_raw_locations(item_code, from_warehouses, required_qty, company, consid
 
 
 def _get_storage_for_batch(item_code, warehouse, batch_no):
-    """Get storage breakdown for a specific batch in a warehouse from SABB/SABE."""
+    """Get storage breakdown for a specific batch in a warehouse.
+
+    Joins SLE (source of storage) with SABB/SABE (source of batch_no)
+    via the serial_and_batch_bundle link.
+    """
     return frappe.db.sql("""
-        SELECT sabb.storage, SUM(sabe.qty) as qty
-        FROM `tabSerial and Batch Entry` sabe
-        JOIN `tabSerial and Batch Bundle` sabb ON sabe.parent = sabb.name
-        WHERE sabb.item_code = %(item_code)s
-            AND sabe.warehouse = %(warehouse)s
+        SELECT sle.storage, SUM(sle.actual_qty) as qty
+        FROM `tabStock Ledger Entry` sle
+        JOIN `tabSerial and Batch Bundle` sabb ON sle.serial_and_batch_bundle = sabb.name
+        JOIN `tabSerial and Batch Entry` sabe ON sabe.parent = sabb.name
+        WHERE sle.item_code = %(item_code)s
+            AND sle.warehouse = %(warehouse)s
             AND sabe.batch_no = %(batch_no)s
-            AND sabb.docstatus = 1
-            AND sabb.is_cancelled = 0
-            AND sabb.storage IS NOT NULL
-            AND sabb.storage != ''
-        GROUP BY sabb.storage
-        HAVING SUM(sabe.qty) > 0
-        ORDER BY MIN(sabb.creation)
+            AND sle.is_cancelled = 0
+            AND sle.storage IS NOT NULL
+            AND sle.storage != ''
+        GROUP BY sle.storage
+        HAVING SUM(sle.actual_qty) > 0
+        ORDER BY MIN(sle.posting_date), MIN(sle.posting_time), MIN(sle.creation)
     """, {"item_code": item_code, "warehouse": warehouse, "batch_no": batch_no}, as_dict=True)
 
 

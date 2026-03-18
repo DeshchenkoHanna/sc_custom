@@ -711,10 +711,16 @@ def patched_make_serial_and_batch_bundle(self, serial_nos=None, batch_nos=None):
         for df in meta.get_table_fields():
             child_meta = frappe.get_meta(df.options)
             if child_meta.has_field("storage"):
-                storage = frappe.db.get_value(df.options, self.voucher_detail_no, "storage")
-                if storage:
-                    self.storage = storage
-                    self.__dict__["storage"] = storage
+                # Try storage (outward/source), then to_storage (inward/target)
+                fields = ["storage"]
+                if child_meta.has_field("to_storage"):
+                    fields.append("to_storage")
+                row_data = frappe.db.get_value(df.options, self.voucher_detail_no, fields, as_dict=True)
+                if row_data:
+                    storage = row_data.get("storage") or row_data.get("to_storage")
+                    if storage:
+                        self.storage = storage
+                        self.__dict__["storage"] = storage
                 break
 
     return _original_make_serial_and_batch_bundle(self, serial_nos, batch_nos)
