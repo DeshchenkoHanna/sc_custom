@@ -2,6 +2,18 @@
 
 Storage-as-Inventory-Dimension system for ERPNext. Tracks warehouse → storage → batch/serial hierarchies through manufacturing, procurement, and delivery workflows.
 
+## Prerequisites
+
+This app requires the following standard ERPNext configuration:
+
+1. **DocType "Storage"** — must exist as a standalone DocType (created manually)
+2. **Inventory Dimension "Storage"** — configured in ERPNext with:
+   - **Apply to All Inventory Documents** enabled
+   - **Validate Negative Stock** enabled
+   - **Mandatory Depends On** is not set (not mandatory)
+
+The app builds on top of these standard ERPNext Inventory Dimension features by adding storage-aware logic for serial/batch handling, Pick List allocation, manufacturing workflows, and automated storage inheritance.
+
 ## Custom Fields
 
 | DocType | Field | Type | Description |

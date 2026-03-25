@@ -333,7 +333,24 @@ def patched_get_available_serial_nos(kwargs):
 
         filters["batch_no"] = ("in", batches)
 
-    return sabb_module.get_serial_nos_based_on_filters(filters, fields, order_by, kwargs)
+    if hasattr(sabb_module, "get_serial_nos_based_on_filters"):
+        return sabb_module.get_serial_nos_based_on_filters(filters, fields, order_by, kwargs)
+
+    # Fallback for older erpnext versions without get_serial_nos_based_on_filters
+    from frappe.utils import cint
+
+    if kwargs.based_on == "LIFO":
+        order_by = "creation desc"
+    elif kwargs.based_on == "Expiry":
+        order_by = "amc_expiry_date asc"
+
+    return frappe.get_all(
+        "Serial No",
+        fields=fields,
+        filters=filters,
+        limit=cint(kwargs.qty) or 10000000,
+        order_by=order_by,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +372,7 @@ def patched_validate_serial_nos_inventory(self):
     if not (self.has_serial_no and self.type_of_transaction == "Outward"):
         return
 
-    if self.voucher_type == "Stock Reconciliation":
+    if self.voucher_type == "Stock Reconciliation" and hasattr(self, "get_serial_nos_for_validate"):
         serial_nos, batches = self.get_serial_nos_for_validate()
     else:
         serial_nos = [d.serial_no for d in self.entries if d.serial_no]
@@ -388,7 +405,7 @@ def patched_validate_serial_nos_inventory(self):
             }
         )
 
-    if self.voucher_type == "Delivery Note":
+    if self.voucher_type == "Delivery Note" and hasattr(self, "get_sre_against_dn"):
         kwargs["ignore_voucher_nos"] = self.get_sre_against_dn()
 
     available_serial_nos = sabb_module.get_available_serial_nos(frappe._dict(kwargs))
@@ -700,7 +717,7 @@ def patched_create_serial_batch_no_ledgers(
     return doc
 
 
-def patched_make_serial_and_batch_bundle(self, serial_nos=None, batch_nos=None):
+def patched_make_serial_and_batch_bundle(self, *args, **kwargs):
     """Storage-aware wrapper for SerialBatchCreation.make_serial_and_batch_bundle.
 
     When storage is not in the args (e.g. make_bundle_using_old_serial_batch_fields),
@@ -723,7 +740,7 @@ def patched_make_serial_and_batch_bundle(self, serial_nos=None, batch_nos=None):
                         self.__dict__["storage"] = storage
                 break
 
-    return _original_make_serial_and_batch_bundle(self, serial_nos, batch_nos)
+    return _original_make_serial_and_batch_bundle(self, *args, **kwargs)
 
 
 def apply_monkey_patches():
