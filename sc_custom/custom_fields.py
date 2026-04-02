@@ -10,6 +10,37 @@ def create_sc_custom_fields():
     """Create custom fields for SC Custom app"""
 
     custom_fields = {
+        "Item": [
+            {
+                "fieldname": "custom_do_not_explode_default",
+                "label": "Do Not Explode by Default",
+                "fieldtype": "Check",
+                "default": "0",
+                "insert_after": "default_bom",
+                "description": "When checked, 'Do Not Explode' will be automatically set when this item is added to a BOM",
+                "translatable": 0
+            },
+            {
+                "fieldname": "custom_used_in_boms_tab",
+                "label": "Used In BOMs",
+                "fieldtype": "Tab Break",
+                "insert_after": "total_projected_qty",
+                "depends_on": "eval:doc.include_item_in_manufacturing",
+                "translatable": 0
+            },
+            {
+                "fieldname": "custom_used_in_boms_section",
+                "fieldtype": "Section Break",
+                "insert_after": "custom_used_in_boms_tab",
+                "translatable": 0
+            },
+            {
+                "fieldname": "custom_used_in_boms_html",
+                "fieldtype": "HTML",
+                "insert_after": "custom_used_in_boms_section",
+                "translatable": 0
+            },
+        ],
         "Pick List Item": [
             {
                 "fieldname": "storage",

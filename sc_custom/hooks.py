@@ -49,7 +49,9 @@ doctype_js = {
     "Stock Entry": "public/js/stock_entry.js",
     "Work Order": "public/js/work_order.js",
     "Delivery Note": "public/js/delivery_note.js",
-    "Batch": "public/js/batch.js"
+    "Batch": "public/js/batch.js",
+    "Item": "public/js/item.js",
+    "BOM": "public/js/bom.js"
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
@@ -195,7 +197,11 @@ fixtures = [
                     "Serial and Batch Bundle-storage",
                     "Serial and Batch Entry-storage",
                     "Stock Reservation Entry-storage",
-                    "Subcontracting Order-supplier_storage"
+                    "Subcontracting Order-supplier_storage",
+                    "Item-custom_do_not_explode_default",
+                    "Item-custom_used_in_boms_tab",
+                    "Item-custom_used_in_boms_section",
+                    "Item-custom_used_in_boms_html"
                 ]
             ]
         ]
