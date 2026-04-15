@@ -197,7 +197,7 @@ def _get_raw_locations(item_code, from_warehouses, required_qty, company, consid
         )
     elif has_batch_no:
         return get_available_item_locations_for_batched_item(
-            item_code, from_warehouses,
+            item_code, from_warehouses, company,
             consider_rejected_warehouses=consider_rejected_warehouses,
         )
     else:
@@ -328,6 +328,7 @@ def patched_get_available_item_locations(
     ignore_validation=False,
     picked_item_details=None,
     consider_rejected_warehouses=False,
+    priority_warehouses=None,
 ):
     """Override: prioritize WO warehouse, expand with storage, then trim."""
     wo_warehouses = None
@@ -374,7 +375,7 @@ def patched_get_available_item_locations(
 
     # Trim to required qty
     if locations:
-        locations = get_locations_based_on_required_qty(locations, required_qty)
+        locations = get_locations_based_on_required_qty(locations, required_qty, wo_warehouses or [])
 
     # Validate
     if not ignore_validation:

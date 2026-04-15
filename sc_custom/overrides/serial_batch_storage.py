@@ -99,7 +99,7 @@ def patched_get_available_batches(kwargs):
     """Override of serial_and_batch_bundle.get_available_batches.
 
     Only change vs standard: adds WHERE sle.storage = kwargs.storage
-    when kwargs.storage is provided.
+    when kwargs.storage is provided, and company filter.
     """
     from erpnext.stock.utils import get_combine_datetime
     from frappe.utils import nowtime, today
@@ -128,6 +128,9 @@ def patched_get_available_batches(kwargs):
     # --- Phase 4 addition: storage filter ---
     if kwargs.get("storage"):
         query = query.where(sle.storage == kwargs.storage)
+
+    if kwargs.get("company"):
+        query = query.where(sle.company == kwargs.get("company"))
 
     if not kwargs.get("for_stock_levels"):
         query = query.where(
@@ -219,6 +222,9 @@ def patched_get_stock_ledgers_batches(kwargs):
     # --- Phase 4 addition: storage filter ---
     if kwargs.get("storage"):
         query = query.where(sle.storage == kwargs.storage)
+
+    if kwargs.get("company"):
+        query = query.where(sle.company == kwargs.get("company"))
 
     if not kwargs.get("for_stock_levels"):
         query = query.where(
@@ -512,6 +518,9 @@ def patched_get_picked_batches(kwargs) -> dict:
     if kwargs.get("storage"):
         query = query.where(table.storage == kwargs.storage)
 
+    if kwargs.get("company"):
+        query = query.where(table.company == kwargs.get("company"))
+
     if kwargs.get("item_code"):
         query = query.where(table.item_code == kwargs.get("item_code"))
 
@@ -575,6 +584,9 @@ def patched_get_reserved_batches_for_sre(kwargs) -> dict:
     # --- Phase 8 addition: storage filter ---
     if kwargs.get("storage"):
         query = query.where(sre.storage == kwargs.storage)
+
+    if kwargs.get("company"):
+        query = query.where(sre.company == kwargs.get("company"))
 
     if kwargs.batch_no:
         if isinstance(kwargs.batch_no, list):
