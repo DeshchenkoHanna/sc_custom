@@ -1,6 +1,6 @@
 /**
  * Stock Entry customizations for SC Custom
- * Auto-populate Storage field from Work Order, Pick List and Manufacturing Settings
+ * Auto-populate Storage field from Work Order, Pick List and Company settings
  */
 
 frappe.ui.form.on('Stock Entry', {
@@ -104,7 +104,7 @@ frappe.ui.form.on('Stock Entry', {
 				set_storage_from_work_order(frm);
 			}
 		} else if (frm.doc.purpose === 'Material Consumption for Manufacture' || frm.doc.purpose === 'Manufacture') {
-			// Set storage from Manufacturing Settings
+			// Set storage from Company settings
 			set_storage_for_manufacture(frm);
 		} else if (frm.doc.purpose === 'Send to Subcontractor' && frm.doc.subcontracting_order) {
 			set_storage_from_subcontracting_order(frm);
@@ -114,14 +114,20 @@ frappe.ui.form.on('Stock Entry', {
 
 /**
  * Get resolved wip_storage and fg_storage:
- * WO fields first, then Manufacturing Settings defaults as fallback.
+ * WO fields first, then Company defaults as fallback.
  * Returns Promise resolving to {wip_storage, fg_storage}
  */
 function get_resolved_storage(frm) {
-	let promises = [
-		frappe.db.get_single_value('Manufacturing Settings', 'default_wip_storage'),
-		frappe.db.get_single_value('Manufacturing Settings', 'default_fg_storage')
-	];
+	let company = frm.doc.company || frappe.defaults.get_default('company');
+	let promises = [];
+
+	if (company) {
+		promises.push(
+			frappe.db.get_value('Company', company, ['default_wip_storage', 'default_fg_storage'])
+		);
+	} else {
+		promises.push(Promise.resolve(null));
+	}
 
 	if (frm.doc.work_order) {
 		promises.push(
@@ -130,14 +136,18 @@ function get_resolved_storage(frm) {
 	}
 
 	return Promise.all(promises).then(function(results) {
-		let default_wip = results[0];
-		let default_fg = results[1];
+		let default_wip = '';
+		let default_fg = '';
+		if (results[0] && results[0].message) {
+			default_wip = results[0].message.default_wip_storage || '';
+			default_fg = results[0].message.default_fg_storage || '';
+		}
+
 		let wo_wip = '';
 		let wo_fg = '';
-
-		if (results[2] && results[2].message) {
-			wo_wip = results[2].message.wip_storage || '';
-			wo_fg = results[2].message.fg_storage || '';
+		if (results[1] && results[1].message) {
+			wo_wip = results[1].message.wip_storage || '';
+			wo_fg = results[1].message.fg_storage || '';
 		}
 
 		return {
@@ -173,7 +183,7 @@ function copy_storage_from_pick_list(frm) {
 				updated = true;
 			}
 
-			// Set target storage: WO wip_storage > Manufacturing Settings default
+			// Set target storage: WO wip_storage > Company default
 			if (!se_item.to_storage && se_item.t_warehouse && storage.wip_storage) {
 				frappe.model.set_value(se_item.doctype, se_item.name, 'to_storage', storage.wip_storage);
 				updated = true;
@@ -212,7 +222,7 @@ function set_storage_for_manufacture(frm) {
 			let is_finished = item.is_finished_item || 0;
 
 			if (is_finished) {
-				// Finished item: target storage from WO fg_storage > Manufacturing Settings
+				// Finished item: target storage from WO fg_storage > Company default
 				if (!item.to_storage && item.t_warehouse && storage.fg_storage) {
 					frappe.model.set_value(item.doctype, item.name, 'to_storage', storage.fg_storage);
 					updated = true;
@@ -220,7 +230,7 @@ function set_storage_for_manufacture(frm) {
 			} else {
 				let t_item = transfer_items[item.item_code];
 
-				// Storage: transfer STE to_storage > WO wip_storage > Manufacturing Settings
+				// Storage: transfer STE to_storage > WO wip_storage > Company default
 				if (!item.storage && item.s_warehouse) {
 					let src_storage = (t_item && t_item.to_storage) || storage.wip_storage;
 					if (src_storage) {
@@ -311,7 +321,7 @@ function set_storage_from_work_order(frm) {
 				}
 			}
 
-			// Set target storage: WO wip_storage > Manufacturing Settings default
+			// Set target storage: WO wip_storage > Company default
 			if (!se_item.to_storage && se_item.t_warehouse && storage.wip_storage) {
 				frappe.model.set_value(se_item.doctype, se_item.name, 'to_storage', storage.wip_storage);
 				updated = true;

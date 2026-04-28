@@ -299,9 +299,13 @@ def set_bundle_storage(bundle_name, storage):
 
 
 @frappe.whitelist()
-def get_default_storage():
-	"""Get default storage values from Manufacturing Settings."""
-	doc = frappe.get_cached_doc("Manufacturing Settings")
+def get_default_storage(company=None):
+	"""Get default storage values from Company."""
+	if not company:
+		company = frappe.defaults.get_defaults().company
+	if not company:
+		return {"wip_storage": "", "fg_storage": ""}
+	doc = frappe.get_cached_doc("Company", company)
 	return {
 		"wip_storage": doc.get("default_wip_storage") or "",
 		"fg_storage": doc.get("default_fg_storage") or "",

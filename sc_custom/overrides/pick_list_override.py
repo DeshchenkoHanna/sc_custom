@@ -149,15 +149,18 @@ def patched_set_item_locations(self, save=False):
                 delattr(frappe.local, attr)
 
 
-def _get_exclude_warehouses():
+def _get_exclude_warehouses(company=None):
     """Get warehouses to exclude from fallback search (WIP + FG)."""
     exclude = set()
 
-    ms = frappe.get_cached_doc("Manufacturing Settings")
-    if ms.default_wip_warehouse:
-        exclude.add(ms.default_wip_warehouse)
-    if ms.default_fg_warehouse:
-        exclude.add(ms.default_fg_warehouse)
+    if not company:
+        company = frappe.defaults.get_defaults().company
+    if company:
+        company_doc = frappe.get_cached_doc("Company", company)
+        if company_doc.default_wip_warehouse:
+            exclude.add(company_doc.default_wip_warehouse)
+        if company_doc.default_fg_warehouse:
+            exclude.add(company_doc.default_fg_warehouse)
 
     wo_name = getattr(frappe.local, "_sc_custom_wo_name", None)
     if wo_name:
@@ -328,7 +331,6 @@ def patched_get_available_item_locations(
     ignore_validation=False,
     picked_item_details=None,
     consider_rejected_warehouses=False,
-    priority_warehouses=None,
 ):
     """Override: prioritize WO warehouse, expand with storage, then trim."""
     wo_warehouses = None
@@ -351,7 +353,7 @@ def patched_get_available_item_locations(
         validate_picked_materials,
     )
 
-    exclude = _get_exclude_warehouses()
+    exclude = _get_exclude_warehouses(company)
 
     locations = _get_raw_locations(
         item_code, [], required_qty, company, consider_rejected_warehouses
@@ -375,7 +377,7 @@ def patched_get_available_item_locations(
 
     # Trim to required qty
     if locations:
-        locations = get_locations_based_on_required_qty(locations, required_qty, wo_warehouses or [])
+        locations = get_locations_based_on_required_qty(locations, required_qty)
 
     # Validate
     if not ignore_validation:

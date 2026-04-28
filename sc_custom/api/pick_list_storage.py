@@ -55,7 +55,8 @@ def get_available_stock_for_items(items_json, company=None, work_order=None, pur
 
 		wip_warehouse = frappe.db.get_value("Work Order", work_order, "wip_warehouse")
 		if not wip_warehouse:
-			wip_warehouse = frappe.db.get_single_value("Manufacturing Settings", "default_wip_warehouse")
+			company = frappe.defaults.get_defaults().company
+		wip_warehouse = frappe.db.get_value("Company", company, "default_wip_warehouse") if company else None
 		exclude_warehouses = wip_warehouse
 
 	result = []

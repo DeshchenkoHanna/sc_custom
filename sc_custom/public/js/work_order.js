@@ -1,7 +1,7 @@
 /**
  * Work Order customizations for SC Custom
  *
- * - Default storage fetched from Manufacturing Settings on new docs
+ * - Default storage fetched from Company settings on new docs
  */
 
 frappe.ui.form.on('Work Order', {

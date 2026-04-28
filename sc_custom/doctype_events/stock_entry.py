@@ -75,16 +75,16 @@ def on_submit_stock_entry(doc, method=None):
 
 def set_default_storage(doc):
     """
-    Set default storage locations from Manufacturing Settings
-    Similar to how Work Order sets default wip_warehouse
+    Set default storage locations from Company settings.
+    Similar to how Work Order sets default wip_warehouse.
 
     For Material Transfer for Manufacture:
     - Copy source storage from Pick List items
-    - Set target storage from Manufacturing Settings default_wip_storage
+    - Set target storage from Company default_wip_storage
 
     For Material Consumption for Manufacture:
-    - Set source storage from Manufacturing Settings default_wip_storage (consuming from WIP)
-    - Set target storage from Manufacturing Settings default_fg_storage (for finished goods)
+    - Set source storage from Company default_wip_storage (consuming from WIP)
+    - Set target storage from Company default_fg_storage (for finished goods)
 
     For Manufacture (Finish):
     - Raw materials: source storage = default_wip_storage
@@ -112,11 +112,15 @@ def set_default_storage(doc):
                         item.to_storage = supplier_storage
         return
 
-    # Get default storage values from Manufacturing Settings
-    default_wip_storage = frappe.db.get_single_value("Manufacturing Settings", "default_wip_storage")
-    default_fg_storage = frappe.db.get_single_value("Manufacturing Settings", "default_fg_storage")
+    # Get default storage values from Company
+    company = doc.company or frappe.defaults.get_defaults().company
+    default_wip_storage = None
+    default_fg_storage = None
+    if company:
+        default_wip_storage = frappe.db.get_value("Company", company, "default_wip_storage")
+        default_fg_storage = frappe.db.get_value("Company", company, "default_fg_storage")
 
-    # If linked to a Work Order, prefer its storage values over Manufacturing Settings defaults
+    # If linked to a Work Order, prefer its storage values over Company defaults
     wo_wip_storage = None
     wo_fg_storage = None
     if doc.work_order:
@@ -171,7 +175,7 @@ def set_default_storage(doc):
                                 item.batch_no = batch_no
                                 item.use_serial_batch_fields = 1
 
-                # Set target storage: WO wip_storage > Manufacturing Settings default
+                # Set target storage: WO wip_storage > Company default
                 if not item.to_storage and item.t_warehouse and wip_storage:
                     item.to_storage = wip_storage
 
@@ -188,7 +192,7 @@ def set_default_storage(doc):
                     if storage:
                         item.storage = storage
 
-                # Set target storage: WO wip_storage > Manufacturing Settings default
+                # Set target storage: WO wip_storage > Company default
                 if not item.to_storage and item.t_warehouse and wip_storage:
                     item.to_storage = wip_storage
 
@@ -203,13 +207,13 @@ def set_default_storage(doc):
             is_finished = getattr(item, 'is_finished_item', 0)
 
             if is_finished:
-                # Finished item: target storage from WO fg_storage > Manufacturing Settings
+                # Finished item: target storage from WO fg_storage > Company default
                 if not item.to_storage and item.t_warehouse and fg_storage:
                     item.to_storage = fg_storage
             else:
                 t_item = transfer_items.get(item.item_code)
 
-                # Storage: transfer STE to_storage > WO wip_storage > Manufacturing Settings
+                # Storage: transfer STE to_storage > WO wip_storage > Company default
                 if not item.storage and item.s_warehouse:
                     if t_item and t_item.get("to_storage"):
                         item.storage = t_item["to_storage"]

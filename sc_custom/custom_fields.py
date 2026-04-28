@@ -51,7 +51,7 @@ def create_sc_custom_fields():
                 "translatable": 0
             }
         ],
-        "Manufacturing Settings": [
+        "Company": [
             {
                 "fieldname": "default_wip_storage",
                 "label": "Default Work In Progress Storage",

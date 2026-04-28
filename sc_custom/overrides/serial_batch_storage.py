@@ -137,22 +137,20 @@ def patched_get_available_batches(kwargs):
             (batch_table.expiry_date >= today()) | (batch_table.expiry_date.isnull())
         )
 
-    if kwargs.get("posting_date"):
+    if not kwargs.get("posting_datetime") and kwargs.get("posting_date"):
         if kwargs.get("posting_time") is None:
             kwargs.posting_time = nowtime()
-
-        timestamp_condition = sle.posting_datetime <= get_combine_datetime(
+        kwargs["posting_datetime"] = get_combine_datetime(
             kwargs.posting_date, kwargs.posting_time
         )
 
-        if kwargs.get("creation"):
-            timestamp_condition = sle.posting_datetime < get_combine_datetime(
-                kwargs.posting_date, kwargs.posting_time
-            )
+    if kwargs.get("posting_datetime"):
+        timestamp_condition = sle.posting_datetime <= kwargs.posting_datetime
 
+        if kwargs.get("creation"):
+            timestamp_condition = sle.posting_datetime < kwargs.posting_datetime
             timestamp_condition |= (
-                sle.posting_datetime
-                == get_combine_datetime(kwargs.posting_date, kwargs.posting_time)
+                sle.posting_datetime == kwargs.posting_datetime
             ) & (sle.creation < kwargs.creation)
 
         query = query.where(timestamp_condition)
@@ -231,22 +229,20 @@ def patched_get_stock_ledgers_batches(kwargs):
             (batch_table.expiry_date >= today()) | (batch_table.expiry_date.isnull())
         )
 
-    if kwargs.get("posting_date"):
+    if not kwargs.get("posting_datetime") and kwargs.get("posting_date"):
         if kwargs.get("posting_time") is None:
             kwargs.posting_time = nowtime()
-
-        timestamp_condition = sle.posting_datetime <= get_combine_datetime(
+        kwargs["posting_datetime"] = get_combine_datetime(
             kwargs.posting_date, kwargs.posting_time
         )
 
-        if kwargs.get("creation"):
-            timestamp_condition = sle.posting_datetime < get_combine_datetime(
-                kwargs.posting_date, kwargs.posting_time
-            )
+    if kwargs.get("posting_datetime"):
+        timestamp_condition = sle.posting_datetime <= kwargs.posting_datetime
 
+        if kwargs.get("creation"):
+            timestamp_condition = sle.posting_datetime < kwargs.posting_datetime
             timestamp_condition |= (
-                sle.posting_datetime
-                == get_combine_datetime(kwargs.posting_date, kwargs.posting_time)
+                sle.posting_datetime == kwargs.posting_datetime
             ) & (sle.creation < kwargs.creation)
 
         query = query.where(timestamp_condition)
@@ -281,13 +277,14 @@ def patched_get_available_serial_nos(kwargs):
     """Override of serial_and_batch_bundle.get_available_serial_nos.
 
     Only change vs standard: adds filters["storage"] = kwargs.storage
-    when kwargs.storage is provided.
+    when kwargs.storage is provided. Mirrors v16 reservation flow
+    (get_reserved_serial_nos_for_sre → voucher-specific resolution).
     """
-    from frappe.utils import nowtime
-
     from erpnext.stock.doctype.serial_and_batch_bundle import (
         serial_and_batch_bundle as sabb_module,
     )
+    from erpnext.stock.utils import get_combine_datetime
+    from frappe.utils import nowtime
 
     fields = ["name as serial_no", "warehouse"]
     if kwargs.has_batch_no:
@@ -298,6 +295,13 @@ def patched_get_available_serial_nos(kwargs):
         order_by = "creation"
     elif kwargs.based_on == "Expiry":
         order_by = "amc_expiry_date"
+
+    if not kwargs.get("posting_datetime") and kwargs.get("posting_date"):
+        if kwargs.get("posting_time") is None:
+            kwargs.posting_time = nowtime()
+        kwargs["posting_datetime"] = get_combine_datetime(
+            kwargs.posting_date, kwargs.posting_time
+        )
 
     filters = {"item_code": kwargs.item_code}
 
@@ -310,21 +314,50 @@ def patched_get_available_serial_nos(kwargs):
     if kwargs.get("storage"):
         filters["storage"] = kwargs.storage
 
-    ignore_serial_nos = sabb_module.get_reserved_serial_nos(kwargs)
+    reserved_entries = sabb_module.get_reserved_serial_nos_for_sre(kwargs)
+
+    ignore_serial_nos = []
+    if reserved_entries:
+        if (
+            kwargs.get("sabb_voucher_type") == "Delivery Note"
+            and kwargs.get("against_sales_order")
+        ):
+            reserved_voucher_details = [kwargs.get("against_sales_order")]
+        else:
+            reserved_voucher_details = sabb_module.get_reserved_voucher_details(kwargs)
+
+        if reserved_serial_nos := sabb_module.get_reserved_serial_nos_for_voucher(
+            kwargs, reserved_entries, reserved_voucher_details
+        ):
+            filters["name"] = ("in", reserved_serial_nos)
+            return sabb_module.get_serial_nos_based_on_filters(
+                filters, fields, order_by, kwargs
+            )
+
+        elif ignore_reserved_serial_nos := sabb_module.get_other_doc_reserved_serials(
+            kwargs, reserved_entries, reserved_voucher_details
+        ):
+            ignore_serial_nos.extend(ignore_reserved_serial_nos)
+
+    if reserved_for_pos := sabb_module.get_reserved_serial_nos_for_pos(kwargs):
+        ignore_serial_nos.extend(reserved_for_pos)
 
     if kwargs.get("ignore_serial_nos"):
         ignore_serial_nos.extend(kwargs.get("ignore_serial_nos"))
 
-    if kwargs.get("posting_date"):
-        if kwargs.get("posting_time") is None:
-            kwargs.posting_time = nowtime()
+    ignore_serial_nos = list(set(ignore_serial_nos))
 
+    if kwargs.get("posting_datetime"):
         time_based_serial_nos = sabb_module.get_serial_nos_based_on_posting_date(
             kwargs, ignore_serial_nos
         )
 
         if not time_based_serial_nos:
             return []
+
+        for sn in ignore_serial_nos:
+            if sn in time_based_serial_nos:
+                time_based_serial_nos.remove(sn)
 
         filters["name"] = ("in", time_based_serial_nos)
     elif ignore_serial_nos:
@@ -339,24 +372,7 @@ def patched_get_available_serial_nos(kwargs):
 
         filters["batch_no"] = ("in", batches)
 
-    if hasattr(sabb_module, "get_serial_nos_based_on_filters"):
-        return sabb_module.get_serial_nos_based_on_filters(filters, fields, order_by, kwargs)
-
-    # Fallback for older erpnext versions without get_serial_nos_based_on_filters
-    from frappe.utils import cint
-
-    if kwargs.based_on == "LIFO":
-        order_by = "creation desc"
-    elif kwargs.based_on == "Expiry":
-        order_by = "amc_expiry_date asc"
-
-    return frappe.get_all(
-        "Serial No",
-        fields=fields,
-        filters=filters,
-        limit=cint(kwargs.qty) or 10000000,
-        order_by=order_by,
-    )
+    return sabb_module.get_serial_nos_based_on_filters(filters, fields, order_by, kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +407,9 @@ def patched_validate_serial_nos_inventory(self):
         "warehouse": self.warehouse,
         "check_serial_nos": True,
         "serial_nos": serial_nos,
+        "sabb_voucher_type": self.voucher_type,
+        "sabb_voucher_no": self.voucher_no,
+        "sabb_voucher_detail_no": self.voucher_detail_no,
     }
 
     # Note: storage filter intentionally NOT added here.
@@ -406,8 +425,7 @@ def patched_validate_serial_nos_inventory(self):
         kwargs.update(
             {
                 "voucher_no": self.voucher_no,
-                "posting_date": self.posting_date,
-                "posting_time": self.posting_time,
+                "posting_datetime": self.posting_datetime,
             }
         )
 
@@ -623,7 +641,8 @@ def patched_get_reserved_serial_nos_for_sre(kwargs) -> list:
     """Override of serial_and_batch_bundle.get_reserved_serial_nos_for_sre.
 
     Only change vs standard: adds WHERE sre.storage = kwargs.storage
-    when kwargs.storage is provided.
+    when kwargs.storage is provided. Mirrors v16 return format
+    (list of dicts with serial_no, voucher_no, voucher_type).
     """
     sre = frappe.qb.DocType("Stock Reservation Entry")
     sb_entry = frappe.qb.DocType("Serial and Batch Entry")
@@ -631,14 +650,19 @@ def patched_get_reserved_serial_nos_for_sre(kwargs) -> list:
         frappe.qb.from_(sre)
         .inner_join(sb_entry)
         .on(sre.name == sb_entry.parent)
-        .select(sb_entry.serial_no)
+        .select(
+            sb_entry.serial_no,
+            sre.voucher_no,
+            sre.voucher_type,
+        )
         .where(
             (sre.docstatus == 1)
             & (sre.item_code == kwargs.item_code)
-            & (sre.reserved_qty >= sre.delivered_qty)
-            & (sre.status.notin(["Delivered", "Cancelled"]))
+            & (sre.delivered_qty < sre.reserved_qty)
+            & (sb_entry.delivered_qty < sb_entry.qty)
             & (sre.reservation_based_on == "Serial and Batch")
         )
+        .orderby(sb_entry.idx)
     )
 
     # --- Phase 8 addition: storage filter ---
@@ -651,7 +675,7 @@ def patched_get_reserved_serial_nos_for_sre(kwargs) -> list:
     if kwargs.ignore_voucher_nos:
         query = query.where(sre.name.notin(kwargs.ignore_voucher_nos))
 
-    return [row[0] for row in query.run()]
+    return query.run(as_dict=True)
 
 
 # --- Phase 9: SABB creation with storage ---
@@ -668,6 +692,7 @@ def patched_create_serial_batch_no_ledgers(
         get_batch,
         get_type_of_transaction,
     )
+    from erpnext.stock.utils import get_combine_datetime
     from frappe.utils import flt
 
     warehouse = warehouse or (
@@ -680,6 +705,10 @@ def patched_create_serial_batch_no_ledgers(
 
     storage = child_row.get("storage") or ""
 
+    posting_datetime = get_combine_datetime(
+        parent_doc.get("posting_date"), parent_doc.get("posting_time")
+    )
+
     doc = frappe.get_doc(
         {
             "doctype": "Serial and Batch Bundle",
@@ -689,8 +718,7 @@ def patched_create_serial_batch_no_ledgers(
             "storage": storage,
             "is_rejected": child_row.is_rejected,
             "type_of_transaction": type_of_transaction,
-            "posting_date": parent_doc.get("posting_date"),
-            "posting_time": parent_doc.get("posting_time"),
+            "posting_datetime": posting_datetime,
             "company": parent_doc.get("company"),
         }
     )

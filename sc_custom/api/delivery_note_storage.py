@@ -13,7 +13,7 @@ from frappe import _
 def _get_excluded_storages():
 	"""
 	Get list of storages to exclude from default storage selection.
-	Currently excludes default WIP storage from Manufacturing Settings.
+	Currently excludes default WIP storage from Company settings.
 
 	Returns:
 		List of storage names to exclude
@@ -21,11 +21,13 @@ def _get_excluded_storages():
 	excluded = []
 
 	# Exclude default WIP storage
-	default_wip_storage = frappe.db.get_single_value(
-		"Manufacturing Settings", "default_wip_storage"
-	)
-	if default_wip_storage:
-		excluded.append(default_wip_storage)
+	company = frappe.defaults.get_defaults().company
+	if company:
+		default_wip_storage = frappe.db.get_value(
+			"Company", company, "default_wip_storage"
+		)
+		if default_wip_storage:
+			excluded.append(default_wip_storage)
 
 	return excluded
 
