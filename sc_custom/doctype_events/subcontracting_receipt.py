@@ -5,9 +5,19 @@ Subcontracting Receipt events for SC Custom
 import types
 
 import frappe
+from frappe import _
+from frappe.utils import getdate
 
 
 def validate_subcontracting_receipt(doc, method=None):
+    """Validate handler:
+    1. Populate storage / batch_no / serial_no on supplied_items from upstream sources.
+    2. Validate that storage is set on items and supplied_items (gated by posting_date)."""
+    _populate_supplied_items_storage(doc)
+    validate_storage_fields_scr(doc)
+
+
+def _populate_supplied_items_storage(doc):
     """Populate storage, serial_no, batch_no on supplied_items from Send to Subcontractor STE SABBs.
     Falls back to SCO supplier_storage if no SABB data found."""
     sco_name = None
@@ -41,10 +51,42 @@ def validate_subcontracting_receipt(doc, method=None):
             )
     """, {"sco_name": sco_name}, as_dict=True)
 
+    # Tracked items (with batch/serial) — fill storage precisely from STE SABB entries.
     if sabb_data:
         _populate_from_sabb(doc, sabb_data)
-    else:
-        _populate_from_sco(doc, sco_name)
+
+    # Non-tracked items (no batch/serial) and any tracked items SABB lookup missed —
+    # fall back to SCO.supplier_storage. The `if not item.storage` guard inside
+    # _populate_from_sco prevents overwriting values already set by _populate_from_sabb.
+    _populate_from_sco(doc, sco_name)
+
+
+def validate_storage_fields_scr(doc):
+    """Throw a clear row-level error when storage is missing on items or supplied_items.
+
+    Only enforced for documents with posting_date >= 2026-01-01 (mirrors the gate used
+    by the SABB-level validate hook and the Stock Entry storage validations).
+    """
+    if getdate(doc.posting_date) < getdate("2026-01-01"):
+        return
+
+    for item in doc.items or []:
+        if not item.storage:
+            frappe.throw(
+                _("Row #{0}: Storage is mandatory for item {1}").format(
+                    item.idx, frappe.bold(item.item_code)
+                ),
+                title=_("Missing Storage"),
+            )
+
+    for sup in doc.supplied_items or []:
+        if not sup.storage:
+            frappe.throw(
+                _("Row #{0}: Storage is mandatory for supplied item {1}").format(
+                    sup.idx, frappe.bold(sup.rm_item_code)
+                ),
+                title=_("Missing Storage"),
+            )
 
 
 def _populate_from_sabb(doc, sabb_data):
@@ -75,7 +117,12 @@ def _populate_from_sabb(doc, sabb_data):
 
 
 def _populate_from_sco(doc, sco_name):
-    """Fallback: copy supplier_storage from SCO to supplied_items."""
+    """Copy supplier_storage from SCO to supplied_items where storage is still empty.
+
+    Runs after _populate_from_sabb so it backfills:
+    - non-tracked items (no batch/serial — never appear in SABB lookup)
+    - any tracked items that SABB lookup didn't cover
+    """
     supplier_storage = frappe.db.get_value(
         "Subcontracting Order", sco_name, "supplier_storage"
     )
@@ -97,3 +144,47 @@ def before_submit_subcontracting_receipt(doc, method=None):
         return original_create(self, bundle_details, row)
 
     doc.create_serial_batch_bundle = types.MethodType(patched_create, doc)
+
+
+def on_submit_subcontracting_receipt(doc, method=None):
+    """Fallback: set storage on SABBs and entries that didn't get it during creation.
+
+    Mirrors the on_submit hook for Stock Entry. Required because ERPNext's
+    SerialBatchCreation.set_serial_batch_entries appends entries without a `storage`
+    field, so even when our before_submit patch fills the SABB header, the child
+    `Serial and Batch Entry` rows stay empty.
+    """
+    set_storage_on_bundles_scr(doc)
+
+
+def set_storage_on_bundles_scr(doc):
+    """For each items / supplied_items row with a SABB, ensure both the SABB header
+    and its entries have storage populated. Uses db_set / direct SQL so the writes
+    bypass the SABB validate hook (which would otherwise refuse to update a
+    submitted bundle).
+    """
+    for table_field in ("items", "supplied_items"):
+        for row in doc.get(table_field) or []:
+            bundle = row.serial_and_batch_bundle or frappe.db.get_value(
+                row.doctype, row.name, "serial_and_batch_bundle"
+            )
+            if not bundle or not row.storage:
+                continue
+
+            current = frappe.db.get_value(
+                "Serial and Batch Bundle", bundle, "storage"
+            )
+            if not current:
+                frappe.db.set_value(
+                    "Serial and Batch Bundle", bundle, "storage", row.storage
+                )
+
+            # Always sync SABE entries — header may have storage but entries may not
+            frappe.db.sql(
+                """
+                UPDATE `tabSerial and Batch Entry`
+                SET storage = %(storage)s
+                WHERE parent = %(bundle)s AND (storage IS NULL OR storage = '')
+                """,
+                {"storage": row.storage, "bundle": bundle},
+            )

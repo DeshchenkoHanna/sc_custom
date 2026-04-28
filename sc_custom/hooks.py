@@ -178,7 +178,8 @@ doc_events = {
     },
     "Subcontracting Receipt": {
         "validate": "sc_custom.doctype_events.subcontracting_receipt.validate_subcontracting_receipt",
-        "before_submit": "sc_custom.doctype_events.subcontracting_receipt.before_submit_subcontracting_receipt"
+        "before_submit": "sc_custom.doctype_events.subcontracting_receipt.before_submit_subcontracting_receipt",
+        "on_submit": "sc_custom.doctype_events.subcontracting_receipt.on_submit_subcontracting_receipt"
     }
 }
 
@@ -190,8 +191,8 @@ fixtures = [
             [
                 "name", "in", [
                     "Pick List Item-storage",
-                    "Manufacturing Settings-default_wip_storage",
-                    "Manufacturing Settings-default_fg_storage",
+                    "Company-default_wip_storage",
+                    "Company-default_fg_storage",
                     "Delivery Note Item-default_storage",
                     "Serial No-storage",
                     "Serial and Batch Bundle-storage",
