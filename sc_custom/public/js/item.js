@@ -22,10 +22,37 @@ $.extend(sc_custom.bom_tree, {
 
 		const $wrapper = wrapper.$wrapper;
 
-		if (!$wrapper.find(".used-in-bom-tree").length) {
+		if (!$wrapper.find(".used-in-bom-layout").length) {
 			$wrapper.empty();
 			$wrapper.append(`
 				<style>
+					.used-in-bom-layout {
+						display: flex;
+						gap: 24px;
+						padding-top: 10px;
+						align-items: flex-start;
+					}
+					.used-in-bom-tree {
+						flex: 1 1 50%;
+						min-width: 0;
+					}
+					.used-in-bom-components {
+						flex: 1 1 50%;
+						min-width: 0;
+						border-left: 1px solid var(--border-color);
+						padding-left: 16px;
+					}
+					.used-in-bom-components .placeholder {
+						color: var(--text-muted);
+						font-style: italic;
+					}
+					.used-in-bom-components .components-title {
+						font-weight: 600;
+						margin-bottom: 8px;
+					}
+					.used-in-bom-components table tr.current-item {
+						background: var(--gray-100);
+					}
 					.used-in-bom-tree .qty-badge {
 						display: inline-block;
 						padding: 0 0.6em;
@@ -45,20 +72,27 @@ $.extend(sc_custom.bom_tree, {
 						color: var(--text-color);
 					}
 				</style>
-				<div class="used-in-bom-tree" style="padding-top: 10px;"></div>
+				<div class="used-in-bom-layout">
+					<div class="used-in-bom-tree"></div>
+					<div class="used-in-bom-components">
+						<div class="placeholder">${__("Click a BOM's components icon to see its content here.")}</div>
+					</div>
+				</div>
 			`);
 
-			const $tree_area = $wrapper.find(".used-in-bom-tree");
-
-			$tree_area.on("click", ".bom-components-trigger", function (e) {
-				e.preventDefault();
-				e.stopPropagation();
-				const bom = $(this).data("bom");
-				if (bom) sc_custom.bom_tree.show_components(bom, frm.doc.item_code);
-			});
-
-			sc_custom.bom_tree.render_tree(frm, $tree_area);
 		}
+
+		// Re-render tree only when item_code changes (form is reused across docs)
+		const $layout = $wrapper.find(".used-in-bom-layout");
+		if ($layout.data("rendered-for") === frm.doc.item_code) return;
+		$layout.data("rendered-for", frm.doc.item_code);
+
+		const $tree_area = $wrapper.find(".used-in-bom-tree");
+		const $panel = $wrapper.find(".used-in-bom-components");
+		$panel.html(
+			`<div class="placeholder">${__("Click a BOM's components icon to see its content here.")}</div>`
+		);
+		sc_custom.bom_tree.render_tree(frm, $tree_area);
 	},
 
 	render_tree(frm, $tree_area) {
@@ -73,6 +107,30 @@ $.extend(sc_custom.bom_tree, {
 			method: "sc_custom.api.bom_tree.get_used_in_boms",
 			args: {
 				item_code: frm.doc.item_code,
+			},
+			on_click(node) {
+				if (node.is_root) return;
+				const bom = node.data && node.data.value;
+				if (!bom) return;
+				const $panel = $tree_area
+					.closest(".used-in-bom-layout")
+					.find(".used-in-bom-components");
+				// Only auto-update if components panel is already showing some BOM
+				if (!$panel.find(".components-title").length) return;
+				const $parent_container = node.$tree_link
+					.parent()
+					.parent()
+					.parent();
+				const child_label = $parent_container
+					.children(".tree-link")
+					.first()
+					.attr("data-label") || null;
+				sc_custom.bom_tree.render_components(
+					$panel,
+					bom,
+					frm.doc.item_code,
+					child_label
+				);
 			},
 			get_label(node) {
 				if (node.is_root) {
@@ -117,6 +175,11 @@ $.extend(sc_custom.bom_tree, {
 					.on("click", (e) => {
 						e.preventDefault();
 						e.stopPropagation();
+						// Mark this tree-link as selected/active (same as clicking the row)
+						frappe.dom.activate(tree.wrapper, node.$tree_link, "tree-link");
+						tree.set_selected_node(node);
+						tree.wrapper.find(".tree-link.selected").removeClass("selected");
+						node.$tree_link.addClass("selected");
 						// tree-child = parent node's tree-link in DOM (one step closer to root)
 						const $parent_container = node.$tree_link
 							.parent()
@@ -126,7 +189,11 @@ $.extend(sc_custom.bom_tree, {
 							.children(".tree-link")
 							.first()
 							.attr("data-label") || null;
-						sc_custom.bom_tree.show_components(
+						const $panel = $tree_area
+							.closest(".used-in-bom-layout")
+							.find(".used-in-bom-components");
+						sc_custom.bom_tree.render_components(
+							$panel,
 							bom,
 							frm.doc.item_code,
 							child_label
@@ -149,48 +216,57 @@ $.extend(sc_custom.bom_tree, {
 		};
 	},
 
-	show_components(bom_name, current_item_code, tree_child_label) {
+	render_components($panel, bom_name, current_item_code, tree_child_label) {
+		const esc = frappe.utils.escape_html;
+		$panel.html(
+			`<div class="components-title">${__("Components of {0}", [
+				`<a href="/app/bom/${encodeURIComponent(bom_name)}" target="_blank">${esc(bom_name)}</a>`,
+			])}</div><div class="text-muted">${__("Loading...")}</div>`
+		);
+
 		frappe.call({
 			method: "sc_custom.api.bom_tree.get_bom_components",
 			args: { bom_name },
 			callback: (r) => {
 				const rows = r.message || [];
-				const dialog = new frappe.ui.Dialog({
-					title: __("Components of {0}", [bom_name]),
-					size: "large",
-				});
-				const esc = frappe.utils.escape_html;
-				const $body = $(dialog.body);
+				const title_html = `<div class="components-title">${__("Components of {0}", [
+					`<a href="/app/bom/${encodeURIComponent(bom_name)}" target="_blank">${esc(bom_name)}</a>`,
+				])}</div>`;
+
 				if (!rows.length) {
-					$body.html(`<p class="text-muted">${__("No components found.")}</p>`);
-				} else {
-					const trs = rows
-						.map((row) => {
-							const qty = format_qty(row.qty);
-							const item_code_link = `<a href="/app/item/${encodeURIComponent(row.item_code)}" target="_blank">${esc(row.item_code)}</a>`;
-							const item_name = row.item_name && row.item_name !== row.item_code
-								? `: ${esc(row.item_name)}`
-								: "";
-							const bom_link = row.bom_no
-								? `<a href="/app/bom/${encodeURIComponent(row.bom_no)}" target="_blank">${esc(row.bom_no)}</a>`
-								: "";
-							const is_match =
-								row.item_code === current_item_code ||
-								(tree_child_label && row.bom_no === tree_child_label);
-							const row_class = is_match ? ' class="current-item"' : "";
-							return `<tr${row_class}>
-								<td>${item_code_link}${item_name}</td>
-								<td class="text-right">${qty}</td>
-								<td>${esc(row.stock_uom || "")}</td>
-								<td>${bom_link}</td>
-							</tr>`;
-						})
-						.join("");
-					$body.html(`
-						<style>
-							.bom-components-table tr.current-item { background: var(--gray-100); }
-						</style>
-						<table class="table table-sm bom-components-table">
+					$panel.html(
+						title_html +
+							`<p class="text-muted">${__("No components found.")}</p>`
+					);
+					return;
+				}
+
+				const trs = rows
+					.map((row) => {
+						const qty = format_qty(row.qty);
+						const item_code_link = `<a href="/app/item/${encodeURIComponent(row.item_code)}" target="_blank">${esc(row.item_code)}</a>`;
+						const item_name = row.item_name && row.item_name !== row.item_code
+							? `: ${esc(row.item_name)}`
+							: "";
+						const bom_link = row.bom_no
+							? `<a href="/app/bom/${encodeURIComponent(row.bom_no)}" target="_blank">${esc(row.bom_no)}</a>`
+							: "";
+						const is_match =
+							row.item_code === current_item_code ||
+							(tree_child_label && row.bom_no === tree_child_label);
+						const row_class = is_match ? ' class="current-item"' : "";
+						return `<tr${row_class}>
+							<td>${item_code_link}${item_name}</td>
+							<td class="text-right">${qty}</td>
+							<td>${esc(row.stock_uom || "")}</td>
+							<td>${bom_link}</td>
+						</tr>`;
+					})
+					.join("");
+
+				$panel.html(
+					title_html +
+						`<table class="table table-sm bom-components-table">
 							<thead>
 								<tr>
 									<th>${__("Item")}</th>
@@ -200,10 +276,8 @@ $.extend(sc_custom.bom_tree, {
 								</tr>
 							</thead>
 							<tbody>${trs}</tbody>
-						</table>
-					`);
-				}
-				dialog.show();
+						</table>`
+				);
 			},
 		});
 	},
