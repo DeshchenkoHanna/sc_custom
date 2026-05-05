@@ -363,8 +363,9 @@ def validate_storage_fields(doc):
     """
     Validate Stock Entry Detail items based on Stock Entry purpose
 
-    - storage field is mandatory if purpose != 'Material Receipt'
-    - to_storage field is mandatory if purpose != 'Material Issue'
+    Source storage (storage) and target storage (to_storage) requirements mirror
+    the warehouse rules in erpnext.stock.doctype.stock_entry.stock_entry.validate_warehouse.
+
     - For Repack/Manufacture: If "Is Finished Item" is checked, Target Storage is mandatory; otherwise Source Storage is mandatory
 
     NOTE: Validation only applies to documents with posting_date >= 2026-01-01
@@ -375,6 +376,26 @@ def validate_storage_fields(doc):
 
     if not doc.items:
         return
+
+    source_mandatory = {
+        "Material Issue",
+        "Material Transfer",
+        "Material Transfer for Manufacture",
+        "Material Consumption for Manufacture",
+        "Send to Subcontractor",
+        "Return Raw Material to Customer",
+        "Subcontracting Delivery",
+    }
+
+    target_mandatory = {
+        "Material Receipt",
+        "Material Transfer",
+        "Material Transfer for Manufacture",
+        "Send to Subcontractor",
+        "Disassemble",
+        "Receive from Customer",
+        "Subcontracting Return",
+    }
 
     for item in doc.items:
         # Special validation for Repack and Manufacture
@@ -403,42 +424,21 @@ def validate_storage_fields(doc):
             # Skip other validations for Repack/Manufacture
             continue
 
-        # Validate 'storage' field (from_storage/source storage)
-        if doc.purpose != "Material Receipt":
-            if not item.storage:
-                frappe.throw(
-                    _("Row #{0}: Source Storage field is mandatory for Stock Entry with purpose '{1}'").format(
-                        item.idx, doc.purpose
-                    ),
-                    title=_("Missing Storage")
-                )
+        if doc.purpose in source_mandatory and not item.storage:
+            frappe.throw(
+                _("Row #{0}: Source Storage field is mandatory for Stock Entry with purpose '{1}'").format(
+                    item.idx, doc.purpose
+                ),
+                title=_("Missing Storage")
+            )
 
-        # Validate 'to_storage' field (destination storage)
-        if doc.purpose == "Material Receipt":
-            # Material Receipt: target storage is mandatory (receiving goods into storage)
-            if not item.to_storage:
-                frappe.throw(
-                    _("Row #{0}: Target Storage field is mandatory for Stock Entry with purpose '{1}'").format(
-                        item.idx, doc.purpose
-                    ),
-                    title=_("Missing Target Storage")
-                )
-        elif doc.purpose in ["Material Transfer", "Material Transfer for Manufacture", "Disassemble", "Send to Subcontractor"]:
-            if not item.to_storage:
-                frappe.throw(
-                    _("Row #{0}: Target Storage field is mandatory for Stock Entry with purpose '{1}'").format(
-                        item.idx, doc.purpose
-                    ),
-                    title=_("Missing To Storage")
-                )
-        # elif doc.purpose in ["Material Issue", "Material Consumption for Manufacture"]:
-        #     if not item.to_storage:
-        #         frappe.throw(
-        #             _("Row #{0}: Target Storage field is mandatory for Stock Entry with purpose '{1}'").format(
-        #                 item.idx, doc.purpose
-        #             ),
-        #             title=_("Missing To Storage")
-        #         )
+        if doc.purpose in target_mandatory and not item.to_storage:
+            frappe.throw(
+                _("Row #{0}: Target Storage field is mandatory for Stock Entry with purpose '{1}'").format(
+                    item.idx, doc.purpose
+                ),
+                title=_("Missing Target Storage")
+            )
 
 
 def validate_serial_batch_fields_mismatch(doc):
