@@ -27,7 +27,7 @@ def _get_root_boms(item_code):
 		JOIN `tabBOM` b ON b.name = bi.parent
 		WHERE bi.item_code = %(item_code)s
 			AND b.docstatus = 1
-		ORDER BY b.is_default DESC, b.is_active DESC
+		ORDER BY b.item, bi.parent
 		""",
 		{"item_code": item_code},
 		as_dict=True,
@@ -54,7 +54,7 @@ def _get_parent_boms(bom_name):
 		JOIN `tabBOM` b ON b.name = bi.parent
 		WHERE bi.bom_no = %(bom_name)s
 			AND b.docstatus = 1
-		ORDER BY b.is_default DESC, b.is_active DESC
+		ORDER BY b.item, bi.parent
 		""",
 		{"bom_name": bom_name},
 		as_dict=True,

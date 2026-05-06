@@ -71,6 +71,11 @@ $.extend(sc_custom.bom_tree, {
 					.used-in-bom-tree .bom-components-trigger:hover {
 						color: var(--text-color);
 					}
+					.used-in-bom-tree .tree-separator {
+						list-style: none;
+						border-top: 1px solid var(--border-color);
+						margin: 4px 0;
+					}
 				</style>
 				<div class="used-in-bom-layout">
 					<div class="used-in-bom-tree"></div>
@@ -161,6 +166,21 @@ $.extend(sc_custom.bom_tree, {
 				if (node.is_root) return;
 				const bom = node.data && node.data.value;
 				if (!bom) return;
+
+				// Insert separator if previous sibling node has different item_code
+				const $li = node.$tree_link.parent();
+				const $prev_li = $li.prev("li.tree-node");
+				if ($prev_li.length) {
+					const prev_node = $prev_li.find("> .tree-link").data("node");
+					if (
+						prev_node &&
+						prev_node.data &&
+						prev_node.data.item_code !== node.data.item_code
+					) {
+						$('<li class="tree-separator"></li>').insertBefore($li);
+					}
+				}
+
 				if (node.$tree_link.find(".bom-components-trigger").length) return;
 				const $icon = $(frappe.utils.icon("list-alt", "sm"));
 				const $trigger = $('<span class="bom-components-trigger"></span>')
