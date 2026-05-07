@@ -30,7 +30,7 @@ $.extend(sc_custom.bom_tree, {
 						display: flex;
 						gap: 24px;
 						padding-top: 10px;
-						align-items: flex-start;
+						align-items: stretch;
 					}
 					.used-in-bom-tree {
 						flex: 1 1 50%;
@@ -74,7 +74,16 @@ $.extend(sc_custom.bom_tree, {
 					.used-in-bom-tree .tree-separator {
 						list-style: none;
 						border-top: 1px solid var(--border-color);
-						margin: 4px 0;
+						margin: 4px 0 4px 32px;
+					}
+					.used-in-bom-tree .tree-link > .node-parent,
+					.used-in-bom-tree .tree-link > span:first-child {
+						align-self: center;
+						margin-right: 4px;
+					}
+					.used-in-bom-tree .tree-link > span:first-child:not(.node-parent) {
+						font-family: var(--font-family-monospace, monospace);
+						color: var(--text-muted);
 					}
 				</style>
 				<div class="used-in-bom-layout">
@@ -112,6 +121,23 @@ $.extend(sc_custom.bom_tree, {
 			method: "sc_custom.api.bom_tree.get_used_in_boms",
 			args: {
 				item_code: frm.doc.item_code,
+			},
+			icon_set: {
+				open: frappe.utils.icon("folder-open", "md"),
+				closed: frappe.utils.icon("folder-normal", "md"),
+				leaf: "├─",
+			},
+			on_node_render(node) {
+				if (!node.$ul) return;
+				const $children = node.$ul.children("li.tree-node");
+				$children.each(function () {
+					const $leaf = $(this).find(".tree-link > .node-leaf");
+					if (!$leaf.length) return; // expandable nodes keep folder icon
+					const $next = $(this).next();
+					const is_last_in_group =
+						!$next.length || $next.hasClass("tree-separator");
+					$leaf.text(is_last_in_group ? "└─" : "├─");
+				});
 			},
 			on_click(node) {
 				if (node.is_root) return;
@@ -232,6 +258,19 @@ $.extend(sc_custom.bom_tree, {
 			origToggle(node);
 			if ($trigger.length) {
 				node.$tree_link.append($trigger);
+			}
+			// Update leaf connectors: only the very last tree-node gets └─
+			// tree.js renders leaf icon as bare <span>, expandable as <span class="node-parent">
+			if (node.$ul) {
+				node.$ul.children("li.tree-node").each(function () {
+					const $first_span = $(this)
+						.children(".tree-link")
+						.children("span")
+						.first();
+					if (!$first_span.length || $first_span.hasClass("node-parent")) return;
+					const is_last = !$(this).next().length;
+					$first_span.text(is_last ? "└─" : "├─");
+				});
 			}
 		};
 	},
