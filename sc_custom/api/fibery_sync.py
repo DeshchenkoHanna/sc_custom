@@ -105,7 +105,7 @@ def _post_to_fibery(host, token, commands):
 
 @frappe.whitelist()
 def sync_items(limit=5):
-	"""Manual / test sync: push the first ``limit`` items to Fibery.
+	"""Manual / test sync: push the ``limit`` most recently modified items.
 
 	Call as: /api/method/sc_custom.api.fibery_sync.sync_items
 	or in console: frappe.call("sc_custom.api.fibery_sync.sync_items")
@@ -116,6 +116,7 @@ def sync_items(limit=5):
 	items = frappe.get_all(
 		"Item",
 		fields=["item_code", "item_name"],
+		order_by="modified desc",
 		limit_page_length=limit,
 	)
 	if not items:
