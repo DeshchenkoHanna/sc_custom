@@ -25,7 +25,7 @@ site_config.json keys:
     fibery_modified_field   optional, default "ERP Modified"
                             (Text field that MUST exist in the Fibery DB;
                             used by reconcile() to detect drift)
-    fibery_description_field  optional, default "ERP Description"
+    fibery_description_field  optional, default "Item Description"
                             (plain Text field that MUST exist in the Fibery
                             DB; Item.description is HTML and is stripped to
                             plain text before sending. NOTE: this is NOT the
@@ -74,7 +74,7 @@ def _get_conf():
 	space = frappe.conf.get("fibery_space") or "ERP Dev"
 	database = frappe.conf.get("fibery_db") or "Test-Items"
 	mod_field = frappe.conf.get("fibery_modified_field") or "ERP Modified"
-	desc_field = frappe.conf.get("fibery_description_field") or "ERP Description"
+	desc_field = frappe.conf.get("fibery_description_field") or "Item Description"
 	return host, token, space, database, mod_field, desc_field
 
 
