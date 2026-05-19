@@ -181,6 +181,9 @@ doc_events = {
         "validate": "sc_custom.doctype_events.subcontracting_receipt.validate_subcontracting_receipt",
         "before_submit": "sc_custom.doctype_events.subcontracting_receipt.before_submit_subcontracting_receipt",
         "on_submit": "sc_custom.doctype_events.subcontracting_receipt.on_submit_subcontracting_receipt"
+    },
+    "Item": {
+        "on_update": "sc_custom.fibery_sync.item_events.enqueue_item_for_fibery"
     }
 }
 
@@ -216,23 +219,18 @@ fixtures = [
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"all": [
-# 		"sc_custom.tasks.all"
-# 	],
-# 	"daily": [
-# 		"sc_custom.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"sc_custom.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"sc_custom.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"sc_custom.tasks.monthly"
-# 	],
-# }
+scheduler_events = {
+    "cron": {
+        # Drain the Fibery Sync Queue outbox every 5 minutes.
+        "*/5 * * * *": [
+            "sc_custom.fibery_sync.sync.flush_queue"
+        ],
+        # Nightly full drift reconciliation (re-enqueues into the outbox).
+        "0 2 * * *": [
+            "sc_custom.fibery_sync.sync.reconcile"
+        ],
+    }
+}
 
 # Testing
 # -------
