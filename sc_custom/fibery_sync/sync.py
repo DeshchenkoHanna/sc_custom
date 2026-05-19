@@ -25,6 +25,11 @@ site_config.json keys:
     fibery_modified_field   optional, default "ERP Modified"
                             (Text field that MUST exist in the Fibery DB;
                             used by reconcile() to detect drift)
+    fibery_description_field  optional, default "ERP Description"
+                            (plain Text field that MUST exist in the Fibery
+                            DB; Item.description is HTML and is stripped to
+                            plain text before sending. NOTE: this is NOT the
+                            built-in rich-text "Description" field.)
 """
 
 import json
@@ -69,16 +74,25 @@ def _get_conf():
 	space = frappe.conf.get("fibery_space") or "ERP Dev"
 	database = frappe.conf.get("fibery_db") or "Test-Items"
 	mod_field = frappe.conf.get("fibery_modified_field") or "ERP Modified"
-	return host, token, space, database, mod_field
+	desc_field = frappe.conf.get("fibery_description_field") or "ERP Description"
+	return host, token, space, database, mod_field, desc_field
 
 
-def _build_upsert_command(items, space, database, mod_field):
+def _plain_text(html):
+	"""Item.description is a Text Editor (HTML); Fibery target is plain text."""
+	if not html:
+		return ""
+	return frappe.utils.strip_html_tags(html).strip()
+
+
+def _build_upsert_command(items, space, database, mod_field, desc_field):
 	"""Build the Fibery create-or-update batch command for the given items.
 
 	Uses ``fibery.entity.batch/create-or-update`` with Item Code as the
 	conflict field and ``update-latest`` so existing rows are refreshed
 	rather than duplicated. Also sends the ERP ``modified`` timestamp into
-	``mod_field`` so reconcile() can detect drift.
+	``mod_field`` (drift detection) and the HTML-stripped Item description
+	into ``desc_field``.
 	"""
 	return [
 		{
@@ -91,6 +105,7 @@ def _build_upsert_command(items, space, database, mod_field):
 						f"{space}/Item Code": i.item_code,
 						f"{space}/Name": i.item_name,
 						f"{space}/{mod_field}": str(i.modified),
+						f"{space}/{desc_field}": _plain_text(i.description),
 					}
 					for i in items
 				],
@@ -262,7 +277,7 @@ def flush_queue(batch=100):
 	Each row is isolated and committed independently.
 	"""
 	try:
-		host, token, space, database, mod_field = _get_conf()
+		host, token, space, database, mod_field, desc_field = _get_conf()
 	except frappe.exceptions.ValidationError:
 		# Not configured — nothing we can do; surfaced once in the log.
 		frappe.log_error(title="Fibery Sync", message="Fibery not configured")
@@ -280,7 +295,8 @@ def flush_queue(batch=100):
 
 			item = frappe.db.get_value(
 				"Item", r["item_code"],
-				["item_code", "item_name", "modified"], as_dict=True,
+				["item_code", "item_name", "modified", "description"],
+				as_dict=True,
 			)
 			if not item:
 				# Item deleted after enqueue — drop the work item.
@@ -288,7 +304,9 @@ def flush_queue(batch=100):
 				frappe.db.commit()
 				continue
 
-			commands = _build_upsert_command([item], space, database, mod_field)
+			commands = _build_upsert_command(
+				[item], space, database, mod_field, desc_field
+			)
 			status, body = _post_to_fibery(host, token, commands)
 
 			if _is_success(status, body):
@@ -367,7 +385,7 @@ def reconcile():
 	"""Nightly: enqueue any Item missing in Fibery or whose stored ERP
 	modified timestamp differs from the current one. Only enqueues — the
 	drainer delivers."""
-	host, token, space, database, mod_field = _get_conf()
+	host, token, space, database, mod_field, _desc_field = _get_conf()
 
 	fib = _fibery_snapshot(host, token, space, database, mod_field)
 	if fib is None:
@@ -395,19 +413,19 @@ def sync_items(limit=5):
 	Call as: /api/method/sc_custom.fibery_sync.sync.sync_items
 	or in console: frappe.call("sc_custom.fibery_sync.sync.sync_items")
 	"""
-	host, token, space, database, mod_field = _get_conf()
+	host, token, space, database, mod_field, desc_field = _get_conf()
 	limit = int(limit)
 
 	items = frappe.get_all(
 		"Item",
-		fields=["item_code", "item_name", "modified"],
+		fields=["item_code", "item_name", "modified", "description"],
 		order_by="modified desc",
 		limit_page_length=limit,
 	)
 	if not items:
 		return {"status": "ok", "items_sent": 0, "message": "No items found"}
 
-	commands = _build_upsert_command(items, space, database, mod_field)
+	commands = _build_upsert_command(items, space, database, mod_field, desc_field)
 	status, body = _post_to_fibery(host, token, commands)
 
 	return {
@@ -423,19 +441,19 @@ def scheduled_sync():
 	Kept only for backward reference; no longer wired into scheduler_events.
 	Do not use for new work.
 	"""
-	host, token, space, database, mod_field = _get_conf()
+	host, token, space, database, mod_field, desc_field = _get_conf()
 
 	last_sync = frappe.db.get_default("fibery_last_sync") or "1970-01-01 00:00:00"
 	items = frappe.get_all(
 		"Item",
 		filters={"modified": [">", last_sync]},
-		fields=["item_code", "item_name", "modified"],
+		fields=["item_code", "item_name", "modified", "description"],
 		limit_page_length=500,
 	)
 	if not items:
 		return
 
-	commands = _build_upsert_command(items, space, database, mod_field)
+	commands = _build_upsert_command(items, space, database, mod_field, desc_field)
 	status, body = _post_to_fibery(host, token, commands)
 
 	if status == 200:
