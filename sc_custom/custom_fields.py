@@ -85,6 +85,30 @@ def create_sc_custom_fields():
                 "options": "Storage",
                 "insert_after": "fg_warehouse",
                 "translatable": 0
+            },
+            {
+                "fieldname": "custom_bom_comments",
+                "label": "BOM Comments",
+                "fieldtype": "Text Editor",
+                "insert_after": "stock_uom",
+                "allow_on_submit": 1,
+                "translatable": 0
+            }
+        ],
+        "BOM": [
+            {
+                "fieldname": "custom_section_break_rnvev",
+                "label": "Production Comments",
+                "fieldtype": "Section Break",
+                "insert_after": "project",
+                "translatable": 0
+            },
+            {
+                "fieldname": "custom_wo_comments",
+                "fieldtype": "HTML",
+                "insert_after": "custom_section_break_rnvev",
+                "read_only": 1,
+                "translatable": 0
             }
         ],
         "Serial No": [

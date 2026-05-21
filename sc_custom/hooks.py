@@ -202,7 +202,10 @@ fixtures = [
                     "Item-custom_do_not_explode_default",
                     "Item-custom_used_in_boms_tab",
                     "Item-custom_used_in_boms_section",
-                    "Item-custom_used_in_boms_html"
+                    "Item-custom_used_in_boms_html",
+                    "BOM-custom_section_break_rnvev",
+                    "BOM-custom_wo_comments",
+                    "Work Order-custom_bom_comments"
                 ]
             ]
         ]
