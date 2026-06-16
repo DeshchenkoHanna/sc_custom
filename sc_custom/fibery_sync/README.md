@@ -151,3 +151,105 @@ keys in `site_config.json`.
   last run, and a “Run Now” button for a manual trigger.
 - **Error logs**: the Error Log in Desk, title “Fibery Sync” (the
   processor also writes there on failed deliveries).
+
+## Manual operations and one-time setup
+
+### One-time install on a new site
+
+After `bench install-app sc_custom` and `bench --site <site> migrate`
+the Module Def, the `Fibery Sync Queue` DocType, its table and index,
+the Workspace, and the two `Scheduled Job Type` records
+(`sync.flush_queue`, `sync.reconcile`) are created automatically.
+The following steps cannot live in code and must be done by hand:
+
+1. **Add Fibery credentials** to `sites/<site>/site_config.json`:
+   ```json
+   {
+     "fibery_host":  "youraccount.fibery.io",
+     "fibery_token": "…"
+   }
+   ```
+   Optional overrides: `fibery_space` (default `"ERP Dev"`),
+   `fibery_db` (default `"Test-Items"`), `fibery_modified_field`
+   (default `"ERP Modified"`), `fibery_description_field`
+   (default `"Item Description"`).
+
+2. **Create the target fields in Fibery** in the `Test-Items` database
+   as plain Text fields:
+   - `ERP Modified`
+   - `Item Description`
+
+   These are plain text — *not* the built-in rich-text `Description`.
+   Without them the upsert fails with
+   `entity.error/schema-field-not-found` and the row stays in `Error`.
+
+3. **Enable the scheduler** (production usually has it on by default):
+   ```bash
+   bench --site <site> scheduler enable
+   ```
+
+4. **Backfill the queue** so existing Items are pushed to Fibery
+   without waiting for the first nightly reconciliation:
+   ```bash
+   bench --site <site> execute sc_custom.fibery_sync.sync.enqueue_all
+   ```
+
+### Manually invoking the whitelisted methods
+
+All three live in `sc_custom.fibery_sync.sync` and can be called via
+HTTP, the bench CLI, or the in-app Console.
+
+| Method | What it does | When to use |
+|---|---|---|
+| `enqueue_all` | Get-or-create a queue row for every `Item` (idempotent). Does not contact Fibery itself. | Initial backfill, or after restoring from backup to re-seed the queue. |
+| `requeue_failed` | Reset every row in `Error` back to `Not Sent` with `retry = 0`. | Manual reset after a long Fibery outage / token rotation. |
+| `sync_items` | Push the N most recently modified Items **directly** to Fibery, bypassing the queue. Returns the raw Fibery response. | Smoke test to confirm credentials and field names are correct, without involving the queue. |
+
+Three equivalent ways to call them (replace `<site>` and the method
+suffix as needed):
+
+- **HTTP** (authenticated session or API key):
+  ```
+  POST /api/method/sc_custom.fibery_sync.sync.enqueue_all
+  POST /api/method/sc_custom.fibery_sync.sync.requeue_failed
+  GET  /api/method/sc_custom.fibery_sync.sync.sync_items?limit=5
+  ```
+
+- **bench execute**:
+  ```bash
+  bench --site <site> execute sc_custom.fibery_sync.sync.enqueue_all
+  bench --site <site> execute sc_custom.fibery_sync.sync.requeue_failed
+  bench --site <site> execute sc_custom.fibery_sync.sync.sync_items \
+        --kwargs "{'limit': 5}"
+  ```
+
+- **bench console**:
+  ```python
+  from sc_custom.fibery_sync.sync import (
+      enqueue_all, requeue_failed, sync_items, flush_queue,
+  )
+  enqueue_all()         # enqueue every Item
+  flush_queue()         # ask the drainer to deliver one batch right now
+  requeue_failed()      # re-arm everything stuck in Error
+  sync_items(limit=5)   # raw smoke test
+  ```
+
+### Triggering scheduled jobs on demand
+
+The drainer (`flush_queue`) runs every 5 minutes and the reconciliation
+(`reconcile`) runs nightly at 02:00. To run either of them right now
+without waiting:
+
+- Open the **Scheduled Job Type** record (`sync.flush_queue` or
+  `sync.reconcile`) in Desk and click **Run Now**.
+- Or from the console:
+  ```python
+  frappe.get_doc("Scheduled Job Type", "sync.flush_queue").enqueue(force=True)
+  ```
+
+### Manual recovery of a single Item
+
+If an Item is stuck or you want to force-resend it without touching
+others, open its row in the **Fibery Sync Queue** list and either set
+its status back to `Not Sent` and save, or delete the row and save the
+Item — the `on_update` hook will re-enqueue it.
