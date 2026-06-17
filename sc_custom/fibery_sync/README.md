@@ -170,7 +170,8 @@ The following steps cannot live in code and must be done by hand:
    }
    ```
    Optional overrides: `fibery_space` (default `"ERP Dev"`),
-   `fibery_db` (default `"Test-Items"`), `fibery_modified_field`
+   `fibery_db` (default `"Test-Items"`), `fibery_item_code_field`
+   (default `"Item Code"`), `fibery_modified_field`
    (default `"ERP Modified"`), `fibery_description_field`
    (default `"Item Description"`).
 
