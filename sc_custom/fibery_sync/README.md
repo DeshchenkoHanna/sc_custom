@@ -30,8 +30,11 @@ Wiring in `apps/sc_custom/sc_custom/hooks.py`:
   and run a full reconciliation nightly at 02:00.
 
 Configuration (in the site’s `site_config.json`): `fibery_host`,
-`fibery_token`, plus the optional `fibery_space`, `fibery_db`,
-`fibery_modified_field`, `fibery_description_field`.
+`fibery_token`, plus the optional `fibery_space`, `fibery_db`. The
+Fibery field **names** are NOT in site_config — they live as module
+constants `FIBERY_ITEM_CODE_FIELD`, `FIBERY_MODIFIED_FIELD`,
+`FIBERY_DESCRIPTION_FIELD` at the top of `sync.py`. Renaming a field in
+Fibery is a one-line edit in code.
 
 ## The “Fibery Sync Queue” DocType — the queue table
 
@@ -133,11 +136,11 @@ Fields transmitted to Fibery:
 - `Item Description` ← ERPNext `description` with the HTML markup
   stripped to plain text (`<div><p>…</p></div>` → plain text)
 
-The names of these last three plain-text fields in Fibery
-(`ERP Modified` and `Item Description`) are plain Text fields that
-**must exist** in the `Test-Items` database. The names can be
-overridden via the `fibery_modified_field` / `fibery_description_field`
-keys in `site_config.json`.
+These three plain-text fields in Fibery (`Item Code`, `ERP Modified`,
+`Item Description`) **must exist** in the `Test-Items` database. Their
+names are defined as constants `FIBERY_ITEM_CODE_FIELD`,
+`FIBERY_MODIFIED_FIELD`, `FIBERY_DESCRIPTION_FIELD` at the top of
+`sync.py` — to rename a field in Fibery, edit the matching constant.
 
 ## Where to see status and history
 
@@ -170,10 +173,10 @@ The following steps cannot live in code and must be done by hand:
    }
    ```
    Optional overrides: `fibery_space` (default `"ERP Dev"`),
-   `fibery_db` (default `"Test-Items"`), `fibery_item_code_field`
-   (default `"Item Code"`), `fibery_modified_field`
-   (default `"ERP Modified"`), `fibery_description_field`
-   (default `"Item Description"`).
+   `fibery_db` (default `"Test-Items"`). Fibery **field names** are not
+   in site_config — they are module constants at the top of `sync.py`
+   (`FIBERY_ITEM_CODE_FIELD`, `FIBERY_MODIFIED_FIELD`,
+   `FIBERY_DESCRIPTION_FIELD`).
 
 2. **Create the target fields in Fibery** in the `Test-Items` database
    as plain Text fields:
