@@ -127,20 +127,32 @@ The Fibery request is an idempotent “create or update”:
   entity (it never creates duplicates, even if Fibery somehow lost the
   Item Code field).
 
-Fields transmitted to Fibery:
+Fields transmitted to Fibery (defaults shown; the **name** of each
+target field is a module constant — see top of `sync.py`):
 
-- `Item Code` ← `item_code`
-- `Name` ← `item_name`
-- `ERP Modified` ← string from the ERPNext `modified` field (used by
-  the nightly reconciliation as a state marker)
-- `Item Description` ← ERPNext `description` with the HTML markup
-  stripped to plain text (`<div><p>…</p></div>` → plain text)
+| Fibery field (const) | Fibery type | ERPNext source |
+|---|---|---|
+| `ERP ITM n°` (`FIBERY_ITEM_CODE_FIELD`) | text | `Item.item_code` (also the conflict-field) |
+| `Name` (built-in) | text | `Item.item_name` |
+| `ERP Modified` (`FIBERY_MODIFIED_FIELD`) | text | `str(Item.modified)` (used by nightly reconcile as drift marker) |
+| `Item Description` (`FIBERY_DESCRIPTION_FIELD`) | text | `Item.description` with HTML stripped (NOT the built-in rich-text "Description") |
+| `PO n°` (`FIBERY_PO_FIELD`) | text | name of the last SUBMITTED Purchase Order that ordered this item; `""` if never ordered |
+| `Price per u` (`FIBERY_PRICE_FIELD`) | decimal | `Item.valuation_rate` |
+| `Purchaseable` (`FIBERY_PURCHASEABLE_FIELD`) | bool | `Item.is_purchase_item` |
+| `Supplier` (`FIBERY_SUPPLIER_FIELD`) | text | first row (by `idx`) of `Item Supplier` child table → `supplier` (Supplier ID); `""` if no rows |
+| `Supplier part n°` (`FIBERY_SUPPLIER_PART_FIELD`) | text | first row of `Item Supplier` child table → `supplier_part_no`; `""` if no rows |
 
-These three plain-text fields in Fibery (`Item Code`, `ERP Modified`,
-`Item Description`) **must exist** in the `Test-Items` database. Their
-names are defined as constants `FIBERY_ITEM_CODE_FIELD`,
-`FIBERY_MODIFIED_FIELD`, `FIBERY_DESCRIPTION_FIELD` at the top of
-`sync.py` — to rename a field in Fibery, edit the matching constant.
+All listed Fibery fields **must exist** in the target database with the
+shown type. Rename a field in Fibery → edit the matching constant.
+
+**Known freshness limitation for `PO n°` and `Price per u`**:
+creating a Purchase Order or updating `valuation_rate` (e.g. by stock
+movements) does NOT bump `Item.modified`, so the `on_update` hook
+does not auto-re-enqueue the affected Item, and the nightly reconcile
+also won't catch it (it compares `Item.modified`). To always reflect
+the latest PO / latest valuation, you'd need a separate hook on
+Purchase Order submit/cancel that enqueues affected items — out of
+scope for the basic Item sync.
 
 ## Where to see status and history
 
