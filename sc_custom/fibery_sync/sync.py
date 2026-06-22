@@ -47,7 +47,7 @@ OUTBOX = "Fibery Sync Queue"
 # Each field MUST exist in the Fibery database with the type noted below.
 FIBERY_ITEM_CODE_FIELD = "ERP ITM n°"            # fibery/text — Item Code (conflict-field)
 FIBERY_MODIFIED_FIELD = "ERP Modified"            # fibery/text — ERP modified timestamp
-FIBERY_DESCRIPTION_FIELD = "Item Description"     # fibery/text — HTML-stripped description
+FIBERY_DESCRIPTION_FIELD = "ERP Description"     # fibery/text — HTML-stripped description
 FIBERY_PO_FIELD = "PO n°"                        # fibery/text — last submitted PO number
 FIBERY_PRICE_FIELD = "Price per u"               # fibery/decimal — Item.valuation_rate
 FIBERY_PURCHASEABLE_FIELD = "Purchaseable"        # fibery/bool — Item.is_purchase_item
