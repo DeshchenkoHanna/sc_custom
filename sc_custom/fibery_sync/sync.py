@@ -45,7 +45,7 @@ OUTBOX = "Fibery Sync Queue"
 # Fibery target field names. Centralised here so a Fibery rename is a
 # single-line edit in code, not a per-site site_config.json change.
 # All three are plain Text fields that MUST exist in the Fibery database.
-FIBERY_ITEM_CODE_FIELD = "Item Code"
+FIBERY_ITEM_CODE_FIELD = "ERP ITM n°"
 FIBERY_MODIFIED_FIELD = "ERP Modified"
 FIBERY_DESCRIPTION_FIELD = "Item Description"  # NOT the built-in rich-text "Description"
 
