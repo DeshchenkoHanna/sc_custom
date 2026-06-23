@@ -73,6 +73,15 @@ ITEM_GROUP_MAP = {
 	"Standard Parts": "Standard Parts",
 }
 
+# Only items whose item_group is one of these root groups (or any
+# descendant of them) are synced to Fibery. Items in any other group are
+# silently ignored — they will not be enqueued by the on_update hook,
+# the nightly reconcile, the enqueue_all seeder, or the sync_items test.
+# The list is resolved recursively against the Item Group tree; the
+# result is cached in Frappe's cache for 5 minutes (so adding/removing
+# descendant groups in ERP becomes visible within 5 min).
+SYNC_ITEM_GROUP_ROOTS = ("Manufacturing", "Product Parts")
+
 # Stable namespace so a given item_code always maps to the same fibery/id.
 # Fibery requires fibery/id on every entity in a create-or-update batch;
 # a deterministic id keeps re-runs idempotent.
@@ -112,6 +121,38 @@ def _plain_text(html):
 	if not html:
 		return ""
 	return frappe.utils.strip_html_tags(html).strip()
+
+
+def _allowed_item_groups():
+	"""Resolve SYNC_ITEM_GROUP_ROOTS to the full set of allowed group names.
+
+	Returns ``{root, *descendants}`` for every existing root in
+	``SYNC_ITEM_GROUP_ROOTS``. Missing roots are silently skipped. Result
+	is cached in Frappe's cache for 5 minutes so a tree reshuffle in ERP
+	becomes visible without a process restart.
+	"""
+	cache_key = "fibery_sync_allowed_item_groups"
+	cached = frappe.cache().get_value(cache_key)
+	if cached is not None:
+		return set(cached)
+
+	from frappe.utils.nestedset import get_descendants_of
+
+	allowed = set()
+	for root in SYNC_ITEM_GROUP_ROOTS:
+		if not frappe.db.exists("Item Group", root):
+			continue
+		allowed.add(root)
+		allowed.update(get_descendants_of("Item Group", root) or [])
+
+	frappe.cache().set_value(cache_key, list(allowed), expires_in_sec=300)
+	return allowed
+
+
+def _is_syncable(item_code):
+	"""True iff the Item's item_group is covered by SYNC_ITEM_GROUP_ROOTS."""
+	group = frappe.db.get_value("Item", item_code, "item_group")
+	return bool(group) and group in _allowed_item_groups()
 
 
 def _extra_fields(item_code):
@@ -283,8 +324,11 @@ def enqueue_item(item_code):
 	no network here — only a local INSERT/UPDATE. The autoname is
 	field:item_code so the document name == item_code, giving DB-level
 	dedup (one open row per item).
+
+	Items whose ``item_group`` is outside SYNC_ITEM_GROUP_ROOTS (recursively)
+	are silently ignored.
 	"""
-	if not item_code:
+	if not item_code or not _is_syncable(item_code):
 		return
 
 	if frappe.db.exists(OUTBOX, item_code):
@@ -309,9 +353,16 @@ def enqueue_item(item_code):
 
 @frappe.whitelist()
 def enqueue_all():
-	"""Idempotent seeder: enqueue every Item. Run once after install."""
+	"""Idempotent seeder: enqueue every Item in the allowed item-group
+	tree (SYNC_ITEM_GROUP_ROOTS). Run once after install."""
+	allowed = _allowed_item_groups()
+	if not allowed:
+		return {"enqueued": 0,
+		        "warning": "no item groups matched SYNC_ITEM_GROUP_ROOTS"}
 	count = 0
-	for item_code in frappe.get_all("Item", pluck="name"):
+	for item_code in frappe.get_all(
+		"Item", filters={"item_group": ["in", list(allowed)]}, pluck="name"
+	):
 		enqueue_item(item_code)
 		count += 1
 	frappe.db.commit()
@@ -479,15 +530,24 @@ def _fibery_snapshot(host, token, space, database):
 def reconcile():
 	"""Nightly: enqueue any Item missing in Fibery or whose stored ERP
 	modified timestamp differs from the current one. Only enqueues — the
-	drainer delivers."""
+	drainer delivers. Items outside SYNC_ITEM_GROUP_ROOTS are skipped."""
 	host, token, space, database = _get_conf()
 
 	fib = _fibery_snapshot(host, token, space, database)
 	if fib is None:
 		return  # Fibery unreachable/misconfigured; logged in snapshot.
 
+	allowed = _allowed_item_groups()
+	if not allowed:
+		return {"checked": len(fib), "enqueued": 0,
+		        "warning": "no item groups matched SYNC_ITEM_GROUP_ROOTS"}
+
 	enqueued = 0
-	for it in frappe.get_all("Item", fields=["name", "modified"]):
+	for it in frappe.get_all(
+		"Item",
+		filters={"item_group": ["in", list(allowed)]},
+		fields=["name", "modified"],
+	):
 		current = str(it.modified)
 		if it.name not in fib or fib.get(it.name) != current:
 			enqueue_item(it.name)
@@ -511,8 +571,10 @@ def sync_items(limit=5):
 	host, token, space, database = _get_conf()
 	limit = int(limit)
 
+	allowed = _allowed_item_groups()
 	items = frappe.get_all(
 		"Item",
+		filters={"item_group": ["in", list(allowed)]} if allowed else None,
 		fields=["item_code", "item_name", "modified", "description",
 		        "valuation_rate", "has_serial_no", "has_batch_no",
 		        "item_group"],

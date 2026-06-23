@@ -55,6 +55,18 @@ When a row is successfully delivered to Fibery, it is **deleted**. So
 the table only ever holds work that is still pending or currently
 failing. It is a queue, not a log.
 
+## Which Items are eligible for sync
+
+Only Items whose `item_group` is one of the roots in
+`SYNC_ITEM_GROUP_ROOTS` (top of `sync.py`) — or **any descendant of
+them** in the Item Group tree — are pushed to Fibery. Every producer
+below honours this filter; Items in any other group are silently
+ignored (not enqueued, not reconciled, not seeded by `enqueue_all`,
+not returned by the `sync_items` diagnostic). The resolved set of
+allowed groups is cached for 5 minutes (via Frappe's cache), so adding
+or moving subgroups in ERP becomes effective within 5 minutes without
+a process restart.
+
 ## Who puts an Item into the queue (producers)
 
 An Item can land in the queue in three ways:
