@@ -124,12 +124,16 @@ def _plain_text(html):
 
 
 def _allowed_item_groups():
-	"""Resolve SYNC_ITEM_GROUP_ROOTS to the full set of allowed group names.
+	"""Resolve SYNC_ITEM_GROUP_ROOTS to the set of LEAF Item Groups under
+	those roots.
 
-	Returns ``{root, *descendants}`` for every existing root in
-	``SYNC_ITEM_GROUP_ROOTS``. Missing roots are silently skipped. Result
-	is cached in Frappe's cache for 5 minutes so a tree reshuffle in ERP
-	becomes visible without a process restart.
+	Only groups with ``is_group = 0`` are returned — these are the ones
+	that can actually be picked as ``Item.item_group``. Folder/group
+	entries (``is_group = 1``) are skipped, so they cannot leak into the
+	sync even if legacy data still references them. Missing roots are
+	silently skipped. The result is cached in Frappe's cache for 5
+	minutes, so a tree reshuffle in ERP becomes visible without a process
+	restart.
 	"""
 	cache_key = "fibery_sync_allowed_item_groups"
 	cached = frappe.cache().get_value(cache_key)
@@ -138,15 +142,26 @@ def _allowed_item_groups():
 
 	from frappe.utils.nestedset import get_descendants_of
 
-	allowed = set()
+	candidates = set()
 	for root in SYNC_ITEM_GROUP_ROOTS:
 		if not frappe.db.exists("Item Group", root):
 			continue
-		allowed.add(root)
-		allowed.update(get_descendants_of("Item Group", root) or [])
+		candidates.add(root)
+		candidates.update(get_descendants_of("Item Group", root) or [])
 
-	frappe.cache().set_value(cache_key, list(allowed), expires_in_sec=300)
-	return allowed
+	leaves = set()
+	if candidates:
+		leaves = {
+			r["name"]
+			for r in frappe.get_all(
+				"Item Group",
+				filters={"name": ["in", list(candidates)], "is_group": 0},
+				fields=["name"],
+			)
+		}
+
+	frappe.cache().set_value(cache_key, list(leaves), expires_in_sec=300)
+	return leaves
 
 
 def _is_syncable(item_code):

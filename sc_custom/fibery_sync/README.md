@@ -57,15 +57,18 @@ failing. It is a queue, not a log.
 
 ## Which Items are eligible for sync
 
-Only Items whose `item_group` is one of the roots in
-`SYNC_ITEM_GROUP_ROOTS` (top of `sync.py`) — or **any descendant of
-them** in the Item Group tree — are pushed to Fibery. Every producer
-below honours this filter; Items in any other group are silently
+Only Items whose `item_group` is a **leaf** (`is_group = 0`)
+descending recursively from one of the roots in
+`SYNC_ITEM_GROUP_ROOTS` (top of `sync.py`) are pushed to Fibery.
+Folder/group entries (`is_group = 1`) are skipped even if some legacy
+Item still references one — ERPNext normally forbids selecting a group
+itself on an Item, and we mirror that rule. Every producer below
+honours this filter; Items outside the allowed leaves are silently
 ignored (not enqueued, not reconciled, not seeded by `enqueue_all`,
-not returned by the `sync_items` diagnostic). The resolved set of
-allowed groups is cached for 5 minutes (via Frappe's cache), so adding
-or moving subgroups in ERP becomes effective within 5 minutes without
-a process restart.
+not returned by the `sync_items` diagnostic). The resolved set is
+cached for 5 minutes (via Frappe's cache), so adding or moving
+subgroups in ERP becomes effective within 5 minutes without a process
+restart.
 
 ## Who puts an Item into the queue (producers)
 
