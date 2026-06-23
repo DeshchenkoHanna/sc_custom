@@ -45,14 +45,33 @@ OUTBOX = "Fibery Sync Queue"
 # Fibery target field names. Centralised here so a Fibery rename is a
 # single-line edit in code, not a per-site site_config.json change.
 # Each field MUST exist in the Fibery database with the type noted below.
-FIBERY_ITEM_CODE_FIELD = "ERP ITM n°"            # fibery/text — Item Code (conflict-field)
-FIBERY_MODIFIED_FIELD = "ERP Modified"            # fibery/text — ERP modified timestamp
-FIBERY_DESCRIPTION_FIELD = "ERP Description"     # fibery/text — HTML-stripped description
-FIBERY_PO_FIELD = "PO n°"                        # fibery/text — last submitted PO number
-FIBERY_PRICE_FIELD = "Price per u"               # fibery/decimal — Item.valuation_rate
-FIBERY_PURCHASEABLE_FIELD = "Purchaseable"        # fibery/bool — Item.is_purchase_item
-FIBERY_SUPPLIER_FIELD = "Supplier"                # fibery/text — first Item Supplier row, supplier ID
-FIBERY_SUPPLIER_PART_FIELD = "Supplier part n°"  # fibery/text — first Item Supplier row, supplier_part_no
+FIBERY_ITEM_CODE_FIELD = "ITM n°"                  # fibery/text — Item Code (conflict-field)
+FIBERY_MODIFIED_FIELD = "ERP Modified"             # fibery/text — ERP modified timestamp
+FIBERY_DESCRIPTION_FIELD = "ERP Description"       # fibery/text — HTML-stripped description
+FIBERY_VALUATION_FIELD = "Valuation rate"          # fibery/int — Item.valuation_rate (rounded)
+FIBERY_MAIN_SUPPLIER_FIELD = "Main supplier"       # fibery/text — first Item Supplier row, supplier ID
+FIBERY_MAIN_SUPPLIER_PART_FIELD = "Main supplier part n°"  # fibery/text — first Item Supplier row, supplier_part_no
+FIBERY_HAS_BOM_FIELD = "Has active BOM"            # fibery/bool — has at least one active+submitted BOM
+FIBERY_HAS_PDF_FIELD = "Has pdf attached"          # fibery/bool — has at least one attached file with .pdf extension
+FIBERY_HAS_SERIAL_OR_BATCH_FIELD = "Has serial or batch n°"  # fibery/bool — has_serial_no OR has_batch_no
+FIBERY_ITEM_GROUP_FIELD = "Item group"             # fibery single-select — mapped via ITEM_GROUP_MAP
+
+# ERPNext Item Group -> Fibery "Item group" Single Select option.
+# Items whose item_group is NOT in this map will be sent WITHOUT the Item
+# group field, leaving whatever value already exists in Fibery untouched.
+# To add coverage for more groups, either pre-create the option in Fibery
+# and add an entry here, or map the ERP value to one of the existing options.
+ITEM_GROUP_MAP = {
+	"Assemblies": "Assemblies",
+	"Manufacturing Supplies": "Manufacturing Supplies",
+	"Subcontracted Manufacturing": "Subcontracted Manufacturing",
+	"3D Printed Parts": "3D Printed Parts",
+	"Machined Parts": "Machined Parts",
+	"Sheet Metal Parts": "Sheet Metal Parts",
+	"Welded Parts": "Welded Parts",
+	"Small Parts": "Small Parts",
+	"Standard Parts": "Standard Parts",
+}
 
 # Stable namespace so a given item_code always maps to the same fibery/id.
 # Fibery requires fibery/id on every entity in a create-or-update batch;
@@ -84,7 +103,7 @@ def _get_conf():
 	host = host.replace("https://", "").replace("http://", "").strip("/")
 
 	space = frappe.conf.get("fibery_space") or "ERP Dev"
-	database = frappe.conf.get("fibery_db") or "Test-Items"
+	database = frappe.conf.get("fibery_db") or "ERP-ITM"
 	return host, token, space, database
 
 
@@ -98,29 +117,19 @@ def _plain_text(html):
 def _extra_fields(item_code):
 	"""Per-item derived data not stored directly on the Item doctype.
 
-	- ``last_po``: name of the most recent SUBMITTED Purchase Order that
-	  ordered this item (empty string if never ordered).
-	- ``supplier`` / ``supplier_part_no``: the first row (by idx) of the
+	- ``supplier`` / ``supplier_part_no``: first row (by idx) of the
 	  Item's child table ``Item Supplier`` (empty strings if no rows).
+	- ``has_active_bom``: True iff at least one BOM exists for this item
+	  with ``is_active=1`` and ``docstatus=1``.
+	- ``has_pdf``: True iff at least one File is attached to this Item
+	  whose ``file_name`` ends with ``.pdf`` (case-insensitive). Extension
+	  check only — no MIME sniffing.
 
-	NOTE on freshness: changes to Purchase Orders or to valuation_rate do
-	NOT bump Item.modified, so the on_update hook will not auto-re-enqueue
-	the affected Item. The nightly reconcile catches drift via the
-	ERP Modified field, but only if Item.modified itself changed.
+	NOTE on freshness: changes that don't bump ``Item.modified`` (creating
+	a new BOM, attaching a file, stock movements changing valuation_rate)
+	won't auto-re-enqueue the item. Item must be saved (or the nightly
+	reconcile drift-check picks it up only if ``modified`` itself changed).
 	"""
-	po_rows = frappe.db.sql(
-		"""
-		select po.name
-		from `tabPurchase Order Item` poi
-		join `tabPurchase Order` po on poi.parent = po.name
-		where poi.item_code = %s and po.docstatus = 1
-		order by po.transaction_date desc, po.creation desc
-		limit 1
-		""",
-		item_code,
-	)
-	last_po = po_rows[0][0] if po_rows else ""
-
 	sup_rows = frappe.get_all(
 		"Item Supplier",
 		filters={"parent": item_code, "parenttype": "Item"},
@@ -130,28 +139,55 @@ def _extra_fields(item_code):
 	)
 	sup = sup_rows[0] if sup_rows else {}
 
+	has_active_bom = bool(frappe.db.exists("BOM", {
+		"item": item_code, "is_active": 1, "docstatus": 1,
+	}))
+
+	has_pdf = bool(frappe.db.sql(
+		"""
+		select 1 from `tabFile`
+		where attached_to_doctype = 'Item'
+		  and attached_to_name = %s
+		  and lower(file_name) like %s
+		limit 1
+		""",
+		(item_code, "%.pdf"),
+	))
+
 	return {
-		"last_po": last_po or "",
 		"supplier": sup.get("supplier") or "",
 		"supplier_part_no": sup.get("supplier_part_no") or "",
+		"has_active_bom": has_active_bom,
+		"has_pdf": has_pdf,
 	}
 
 
 def _entity_payload(i, space):
-	"""Build one Fibery entity dict for the given Item dict."""
+	"""Build one Fibery entity dict for the given Item dict.
+
+	The ``Item group`` Single Select is sent only if the ERP value is
+	covered by ITEM_GROUP_MAP; otherwise the field is omitted (Fibery
+	keeps whatever value it currently holds).
+	"""
 	extra = _extra_fields(i.item_code)
-	return {
+	payload = {
 		"fibery/id": _fibery_id(i.item_code),
 		f"{space}/{FIBERY_ITEM_CODE_FIELD}": i.item_code,
 		f"{space}/Name": i.item_name,
 		f"{space}/{FIBERY_MODIFIED_FIELD}": str(i.modified),
 		f"{space}/{FIBERY_DESCRIPTION_FIELD}": _plain_text(i.description),
-		f"{space}/{FIBERY_PO_FIELD}": extra["last_po"],
-		f"{space}/{FIBERY_PRICE_FIELD}": float(i.valuation_rate or 0),
-		f"{space}/{FIBERY_PURCHASEABLE_FIELD}": bool(i.is_purchase_item),
-		f"{space}/{FIBERY_SUPPLIER_FIELD}": extra["supplier"],
-		f"{space}/{FIBERY_SUPPLIER_PART_FIELD}": extra["supplier_part_no"],
+		f"{space}/{FIBERY_VALUATION_FIELD}": int(round(i.valuation_rate or 0)),
+		f"{space}/{FIBERY_MAIN_SUPPLIER_FIELD}": extra["supplier"],
+		f"{space}/{FIBERY_MAIN_SUPPLIER_PART_FIELD}": extra["supplier_part_no"],
+		f"{space}/{FIBERY_HAS_BOM_FIELD}": extra["has_active_bom"],
+		f"{space}/{FIBERY_HAS_PDF_FIELD}": extra["has_pdf"],
+		f"{space}/{FIBERY_HAS_SERIAL_OR_BATCH_FIELD}":
+			bool(i.has_serial_no or i.has_batch_no),
 	}
+	group = ITEM_GROUP_MAP.get(i.item_group)
+	if group:
+		payload[f"{space}/{FIBERY_ITEM_GROUP_FIELD}"] = group
+	return payload
 
 
 def _build_upsert_command(items, space, database):
@@ -159,10 +195,8 @@ def _build_upsert_command(items, space, database):
 
 	Uses ``fibery.entity.batch/create-or-update`` with
 	``FIBERY_ITEM_CODE_FIELD`` as the conflict field and ``update-latest``
-	so existing rows are refreshed rather than duplicated. The entity
-	payload (see :func:`_entity_payload`) covers item code, name, ERP
-	modified timestamp, plain-text description, last Purchase Order,
-	valuation rate, is-purchase flag, and the first Item Supplier row.
+	so existing rows are refreshed rather than duplicated. See
+	:func:`_entity_payload` for the field set actually sent.
 	"""
 	return [
 		{
@@ -357,7 +391,8 @@ def flush_queue(batch=100):
 			item = frappe.db.get_value(
 				"Item", r["item_code"],
 				["item_code", "item_name", "modified", "description",
-				 "valuation_rate", "is_purchase_item"],
+				 "valuation_rate", "has_serial_no", "has_batch_no",
+				 "item_group"],
 				as_dict=True,
 			)
 			if not item:
@@ -479,7 +514,8 @@ def sync_items(limit=5):
 	items = frappe.get_all(
 		"Item",
 		fields=["item_code", "item_name", "modified", "description",
-		        "valuation_rate", "is_purchase_item"],
+		        "valuation_rate", "has_serial_no", "has_batch_no",
+		        "item_group"],
 		order_by="modified desc",
 		limit_page_length=limit,
 	)
@@ -509,7 +545,8 @@ def scheduled_sync():
 		"Item",
 		filters={"modified": [">", last_sync]},
 		fields=["item_code", "item_name", "modified", "description",
-		        "valuation_rate", "is_purchase_item"],
+		        "valuation_rate", "has_serial_no", "has_batch_no",
+		        "item_group"],
 		limit_page_length=500,
 	)
 	if not items:

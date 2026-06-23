@@ -127,32 +127,54 @@ The Fibery request is an idempotent “create or update”:
   entity (it never creates duplicates, even if Fibery somehow lost the
   Item Code field).
 
-Fields transmitted to Fibery (defaults shown; the **name** of each
-target field is a module constant — see top of `sync.py`):
+Target Fibery database (default): `ERP-ITM` in space `ERP Dev`. To point
+at a different database, set `fibery_db` (and/or `fibery_space`) in
+`site_config.json`.
+
+Fields transmitted to Fibery (the **name** of each target field is a
+module constant — see top of `sync.py`):
 
 | Fibery field (const) | Fibery type | ERPNext source |
 |---|---|---|
-| `ERP ITM n°` (`FIBERY_ITEM_CODE_FIELD`) | text | `Item.item_code` (also the conflict-field) |
+| `ITM n°` (`FIBERY_ITEM_CODE_FIELD`) | text | `Item.item_code` (also the conflict-field) |
 | `Name` (built-in) | text | `Item.item_name` |
 | `ERP Modified` (`FIBERY_MODIFIED_FIELD`) | text | `str(Item.modified)` (used by nightly reconcile as drift marker) |
-| `Item Description` (`FIBERY_DESCRIPTION_FIELD`) | text | `Item.description` with HTML stripped (NOT the built-in rich-text "Description") |
-| `PO n°` (`FIBERY_PO_FIELD`) | text | name of the last SUBMITTED Purchase Order that ordered this item; `""` if never ordered |
-| `Price per u` (`FIBERY_PRICE_FIELD`) | decimal | `Item.valuation_rate` |
-| `Purchaseable` (`FIBERY_PURCHASEABLE_FIELD`) | bool | `Item.is_purchase_item` |
-| `Supplier` (`FIBERY_SUPPLIER_FIELD`) | text | first row (by `idx`) of `Item Supplier` child table → `supplier` (Supplier ID); `""` if no rows |
-| `Supplier part n°` (`FIBERY_SUPPLIER_PART_FIELD`) | text | first row of `Item Supplier` child table → `supplier_part_no`; `""` if no rows |
+| `ERP Description` (`FIBERY_DESCRIPTION_FIELD`) | text | `Item.description` with HTML stripped (NOT the built-in rich-text "Description") |
+| `Valuation rate` (`FIBERY_VALUATION_FIELD`) | int | `int(round(Item.valuation_rate))` |
+| `Main supplier` (`FIBERY_MAIN_SUPPLIER_FIELD`) | text | first row (by `idx`) of `Item Supplier` child table → `supplier` (Supplier ID); `""` if no rows |
+| `Main supplier part n°` (`FIBERY_MAIN_SUPPLIER_PART_FIELD`) | text | first row of `Item Supplier` → `supplier_part_no`; `""` if no rows |
+| `Has active BOM` (`FIBERY_HAS_BOM_FIELD`) | bool | True iff a BOM exists for this item with `is_active=1` and `docstatus=1` |
+| `Has pdf attached` (`FIBERY_HAS_PDF_FIELD`) | bool | True iff at least one File is attached to the Item whose `file_name` ends with `.pdf` (case-insensitive — extension check, no MIME sniff) |
+| `Has serial or batch n°` (`FIBERY_HAS_SERIAL_OR_BATCH_FIELD`) | bool | `Item.has_serial_no or Item.has_batch_no` |
+| `Item group` (`FIBERY_ITEM_GROUP_FIELD`) | single-select | `Item.item_group` mapped via `ITEM_GROUP_MAP` (see below) |
 
 All listed Fibery fields **must exist** in the target database with the
 shown type. Rename a field in Fibery → edit the matching constant.
 
-**Known freshness limitation for `PO n°` and `Price per u`**:
-creating a Purchase Order or updating `valuation_rate` (e.g. by stock
-movements) does NOT bump `Item.modified`, so the `on_update` hook
-does not auto-re-enqueue the affected Item, and the nightly reconcile
-also won't catch it (it compares `Item.modified`). To always reflect
-the latest PO / latest valuation, you'd need a separate hook on
-Purchase Order submit/cancel that enqueues affected items — out of
-scope for the basic Item sync.
+### Item group mapping
+
+`ITEM_GROUP_MAP` (top of `sync.py`) maps ERPNext `item_group` values to
+the `Item group` Single Select options that exist in Fibery. If an Item
+has an `item_group` that is **not** in the map, the `Item group` field
+is **omitted from the payload** — Fibery keeps whatever value (if any)
+it currently holds for that entity. To add coverage for a new group:
+either pre-create the option in Fibery and add a `{erp_name: fibery_option}`
+entry to `ITEM_GROUP_MAP`, or map the ERP value onto one of the
+existing options.
+
+### Known freshness limitations
+
+These data sources do NOT bump `Item.modified`, so the `on_update` hook
+and the nightly reconcile (which compares `Item.modified`) will not
+auto-re-enqueue the Item after they change:
+
+- `Valuation rate` — updated by stock movements, which don't save the Item;
+- `Has active BOM` — creating/cancelling a BOM doesn't touch the Item;
+- `Has pdf attached` — attaching/removing files doesn't touch the Item.
+
+To always reflect these, the Item must be re-saved (or a dedicated hook
+added on the relevant doctype to enqueue affected items) — out of scope
+for the basic Item sync.
 
 ## Where to see status and history
 
