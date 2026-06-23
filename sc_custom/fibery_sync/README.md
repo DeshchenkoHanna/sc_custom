@@ -57,18 +57,14 @@ failing. It is a queue, not a log.
 
 ## Which Items are eligible for sync
 
-Only Items whose `item_group` is a **leaf** (`is_group = 0`)
-descending recursively from one of the roots in
-`SYNC_ITEM_GROUP_ROOTS` (top of `sync.py`) are pushed to Fibery.
-Folder/group entries (`is_group = 1`) are skipped even if some legacy
-Item still references one — ERPNext normally forbids selecting a group
-itself on an Item, and we mirror that rule. Every producer below
-honours this filter; Items outside the allowed leaves are silently
-ignored (not enqueued, not reconciled, not seeded by `enqueue_all`,
-not returned by the `sync_items` diagnostic). The resolved set is
-cached for 5 minutes (via Frappe's cache), so adding or moving
-subgroups in ERP becomes effective within 5 minutes without a process
-restart.
+Only Items whose `item_group` is a descendant (recursively) of one of
+the roots in `SYNC_ITEM_GROUP_ROOTS` (top of `sync.py`) are pushed to
+Fibery — regardless of whether the group is itself a folder or a leaf
+(`is_group` is not consulted). Items outside that tree are silently
+ignored: not enqueued, not reconciled, not seeded by `enqueue_all`, not
+returned by the `sync_items` diagnostic. The resolved set is cached for
+5 minutes (via Frappe's cache), so adding or moving subgroups in ERP
+becomes effective within 5 minutes without a process restart.
 
 ## Who puts an Item into the queue (producers)
 
@@ -161,21 +157,28 @@ module constant — see top of `sync.py`):
 | `Has active BOM` (`FIBERY_HAS_BOM_FIELD`) | bool | True iff a BOM exists for this item with `is_active=1` and `docstatus=1` |
 | `Has pdf attached` (`FIBERY_HAS_PDF_FIELD`) | bool | True iff at least one File is attached to the Item whose `file_name` ends with `.pdf` (case-insensitive — extension check, no MIME sniff) |
 | `Has serial or batch n°` (`FIBERY_HAS_SERIAL_OR_BATCH_FIELD`) | bool | `Item.has_serial_no or Item.has_batch_no` |
-| `Item group` (`FIBERY_ITEM_GROUP_FIELD`) | single-select | `Item.item_group` mapped via `ITEM_GROUP_MAP` (see below) |
+| `Item group` (`FIBERY_ITEM_GROUP_FIELD`) | single-select | `Item.item_group` if it matches an existing Fibery option name (see below) |
 
 All listed Fibery fields **must exist** in the target database with the
 shown type. Rename a field in Fibery → edit the matching constant.
 
-### Item group mapping
+### Item group resolution
 
-`ITEM_GROUP_MAP` (top of `sync.py`) maps ERPNext `item_group` values to
-the `Item group` Single Select options that exist in Fibery. If an Item
-has an `item_group` that is **not** in the map, the `Item group` field
-is **omitted from the payload** — Fibery keeps whatever value (if any)
-it currently holds for that entity. To add coverage for a new group:
-either pre-create the option in Fibery and add a `{erp_name: fibery_option}`
-entry to `ITEM_GROUP_MAP`, or map the ERP value onto one of the
-existing options.
+At send time the code fetches the live list of options for the
+`Item group` Single Select from Fibery (one extra API call per
+flush, cached for 5 minutes). The ERP `item_group` value is matched
+**by exact name** against that list:
+
+- match found → the `Item group` field is sent with that value;
+- no match → the field is omitted from the payload; whatever value (if
+  any) is currently in Fibery is left untouched.
+
+Consequence: adding a new Item Group in ERP under
+`SYNC_ITEM_GROUP_ROOTS` AND creating an option with the same name in
+the Fibery `Item group` Single Select is enough to start syncing it —
+no code change required. The 5-minute cache means the new option
+becomes visible to the drainer within 5 minutes (or sooner if the
+process restarts / the cache key is cleared).
 
 ### Known freshness limitations
 

@@ -54,32 +54,14 @@ FIBERY_MAIN_SUPPLIER_PART_FIELD = "Main supplier part n°"  # fibery/text — fi
 FIBERY_HAS_BOM_FIELD = "Has active BOM"            # fibery/bool — has at least one active+submitted BOM
 FIBERY_HAS_PDF_FIELD = "Has pdf attached"          # fibery/bool — has at least one attached file with .pdf extension
 FIBERY_HAS_SERIAL_OR_BATCH_FIELD = "Has serial or batch n°"  # fibery/bool — has_serial_no OR has_batch_no
-FIBERY_ITEM_GROUP_FIELD = "Item group"             # fibery single-select — mapped via ITEM_GROUP_MAP
+FIBERY_ITEM_GROUP_FIELD = "Item group"             # fibery single-select — option name matched dynamically
 
-# ERPNext Item Group -> Fibery "Item group" Single Select option.
-# Items whose item_group is NOT in this map will be sent WITHOUT the Item
-# group field, leaving whatever value already exists in Fibery untouched.
-# To add coverage for more groups, either pre-create the option in Fibery
-# and add an entry here, or map the ERP value to one of the existing options.
-ITEM_GROUP_MAP = {
-	"Assemblies": "Assemblies",
-	"Manufacturing Supplies": "Manufacturing Supplies",
-	"Subcontracted Manufacturing": "Subcontracted Manufacturing",
-	"3D Printed Parts": "3D Printed Parts",
-	"Machined Parts": "Machined Parts",
-	"Sheet Metal Parts": "Sheet Metal Parts",
-	"Welded Parts": "Welded Parts",
-	"Small Parts": "Small Parts",
-	"Standard Parts": "Standard Parts",
-}
-
-# Only items whose item_group is one of these root groups (or any
-# descendant of them) are synced to Fibery. Items in any other group are
-# silently ignored — they will not be enqueued by the on_update hook,
-# the nightly reconcile, the enqueue_all seeder, or the sync_items test.
-# The list is resolved recursively against the Item Group tree; the
-# result is cached in Frappe's cache for 5 minutes (so adding/removing
-# descendant groups in ERP becomes visible within 5 min).
+# Only items whose item_group descends recursively from one of these
+# roots are synced to Fibery. Items in any other group are silently
+# ignored — they will not be enqueued by the on_update hook, the
+# nightly reconcile, the enqueue_all seeder, or the sync_items test.
+# The resolved set is cached in Frappe's cache for 5 minutes so a tree
+# reshuffle in ERP becomes visible without a process restart.
 SYNC_ITEM_GROUP_ROOTS = ("Manufacturing", "Product Parts")
 
 # Stable namespace so a given item_code always maps to the same fibery/id.
@@ -124,16 +106,15 @@ def _plain_text(html):
 
 
 def _allowed_item_groups():
-	"""Resolve SYNC_ITEM_GROUP_ROOTS to the set of LEAF Item Groups under
-	those roots.
+	"""Resolve SYNC_ITEM_GROUP_ROOTS to the full set of allowed group
+	names (roots + all descendants, regardless of ``is_group``).
 
-	Only groups with ``is_group = 0`` are returned — these are the ones
-	that can actually be picked as ``Item.item_group``. Folder/group
-	entries (``is_group = 1``) are skipped, so they cannot leak into the
-	sync even if legacy data still references them. Missing roots are
-	silently skipped. The result is cached in Frappe's cache for 5
-	minutes, so a tree reshuffle in ERP becomes visible without a process
-	restart.
+	Whether a group is itself a folder (``is_group = 1``) is irrelevant
+	for filtering — what matters is the value stored on the Item. ERPNext
+	may or may not allow picking a group itself; we sync whatever is
+	there. Missing roots are silently skipped. Result is cached in
+	Frappe's cache for 5 minutes so a tree reshuffle in ERP becomes
+	visible without a process restart.
 	"""
 	cache_key = "fibery_sync_allowed_item_groups"
 	cached = frappe.cache().get_value(cache_key)
@@ -142,26 +123,58 @@ def _allowed_item_groups():
 
 	from frappe.utils.nestedset import get_descendants_of
 
-	candidates = set()
+	allowed = set()
 	for root in SYNC_ITEM_GROUP_ROOTS:
 		if not frappe.db.exists("Item Group", root):
 			continue
-		candidates.add(root)
-		candidates.update(get_descendants_of("Item Group", root) or [])
+		allowed.add(root)
+		allowed.update(get_descendants_of("Item Group", root) or [])
 
-	leaves = set()
-	if candidates:
-		leaves = {
-			r["name"]
-			for r in frappe.get_all(
-				"Item Group",
-				filters={"name": ["in", list(candidates)], "is_group": 0},
-				fields=["name"],
-			)
-		}
+	frappe.cache().set_value(cache_key, list(allowed), expires_in_sec=300)
+	return allowed
 
-	frappe.cache().set_value(cache_key, list(leaves), expires_in_sec=300)
-	return leaves
+
+def _fibery_item_group_options():
+	"""Cached set of available option names for the Fibery 'Item group'
+	Single Select on the target database.
+
+	Fetched once every 5 minutes by querying the enum entity type. If the
+	fetch fails (Fibery unreachable, schema changed, etc.) we return the
+	empty set — callers then omit the Item group field from the payload,
+	which is safer than guessing and getting an option-not-found error.
+	"""
+	cache_key = "fibery_sync_item_group_options"
+	cached = frappe.cache().get_value(cache_key)
+	if cached is not None:
+		return set(cached)
+
+	options = set()
+	try:
+		host, token, space, database = _get_conf()
+		# Fibery's naming convention for a single-select enum type:
+		# "<space>/<field_name>_<space>/<database>"
+		enum_type = f"{space}/{FIBERY_ITEM_GROUP_FIELD}_{space}/{database}"
+		cmd = [{
+			"command": "fibery.entity/query",
+			"args": {"query": {
+				"q/from": enum_type,
+				"q/select": ["enum/name"],
+				"q/limit": 1000,
+			}},
+		}]
+		status, body = _post_to_fibery(host, token, cmd)
+		if _is_success(status, body):
+			for r in body[0].get("result") or []:
+				n = r.get("enum/name")
+				if n:
+					options.add(n)
+	except Exception:
+		# Don't break sync over a transient schema-fetch failure.
+		options = set()
+
+	# Cache empty set too — short TTL means we'll retry within 5 min.
+	frappe.cache().set_value(cache_key, list(options), expires_in_sec=300)
+	return options
 
 
 def _is_syncable(item_code):
@@ -221,9 +234,13 @@ def _extra_fields(item_code):
 def _entity_payload(i, space):
 	"""Build one Fibery entity dict for the given Item dict.
 
-	The ``Item group`` Single Select is sent only if the ERP value is
-	covered by ITEM_GROUP_MAP; otherwise the field is omitted (Fibery
-	keeps whatever value it currently holds).
+	The ``Item group`` Single Select is sent only when the ERP
+	``item_group`` value matches an existing option name in Fibery
+	(checked at send time against the live enum, cached 5 min). When
+	there is no matching option the field is omitted, leaving whatever
+	value (if any) already exists in Fibery untouched. So adding a new
+	option in Fibery + a matching Item Group in ERP starts syncing
+	automatically — no code change required.
 	"""
 	extra = _extra_fields(i.item_code)
 	payload = {
@@ -240,9 +257,8 @@ def _entity_payload(i, space):
 		f"{space}/{FIBERY_HAS_SERIAL_OR_BATCH_FIELD}":
 			bool(i.has_serial_no or i.has_batch_no),
 	}
-	group = ITEM_GROUP_MAP.get(i.item_group)
-	if group:
-		payload[f"{space}/{FIBERY_ITEM_GROUP_FIELD}"] = group
+	if i.item_group and i.item_group in _fibery_item_group_options():
+		payload[f"{space}/{FIBERY_ITEM_GROUP_FIELD}"] = i.item_group
 	return payload
 
 
