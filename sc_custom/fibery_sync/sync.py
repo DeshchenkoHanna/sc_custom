@@ -55,6 +55,11 @@ FIBERY_HAS_BOM_FIELD = "Has active BOM"            # fibery/bool — has at leas
 FIBERY_HAS_PDF_FIELD = "Has pdf attached"          # fibery/bool — has at least one attached file with .pdf extension
 FIBERY_HAS_SERIAL_OR_BATCH_FIELD = "Has serial or batch n°"  # fibery/bool — has_serial_no OR has_batch_no
 FIBERY_ITEM_GROUP_FIELD = "Item group"             # fibery single-select — option name matched dynamically
+FIBERY_RAW_STOCK_FIELD = "Current raw materials stock"  # fibery/int — SUM(actual_qty) in RAW_MATERIALS_WAREHOUSE only
+FIBERY_FORECASTED_FIELD = "Total forecasted stock"      # fibery/int — all-warehouse stock + open Purchase MR qty
+
+# Warehouse name that "Current raw materials stock" filters to.
+RAW_MATERIALS_WAREHOUSE = "Raw Materials - SC"
 
 # Only items whose item_group descends recursively from one of these
 # roots are synced to Fibery. Items in any other group are silently
@@ -197,11 +202,16 @@ def _extra_fields(item_code):
 	- ``has_pdf``: True iff at least one File is attached to this Item
 	  whose ``file_name`` ends with ``.pdf`` (case-insensitive). Extension
 	  check only — no MIME sniffing.
+	- ``raw_stock``: ``SUM(actual_qty)`` over ``tabBin`` filtered to the
+	  RAW_MATERIALS_WAREHOUSE only (int).
+	- ``forecasted``: all-warehouse current stock plus the still-open
+	  qty across submitted Purchase Material Requests (int).
 
 	NOTE on freshness: changes that don't bump ``Item.modified`` (creating
-	a new BOM, attaching a file, stock movements changing valuation_rate)
-	won't auto-re-enqueue the item. Item must be saved (or the nightly
-	reconcile drift-check picks it up only if ``modified`` itself changed).
+	a new BOM, attaching a file, valuation rate from stock moves) won't
+	auto-re-enqueue from the Item.on_update hook — but stock/forecast
+	changes are handled by separate hooks on Stock Ledger Entry and
+	Material Request (see item_events.py).
 	"""
 	sup_rows = frappe.get_all(
 		"Item Supplier",
@@ -227,11 +237,39 @@ def _extra_fields(item_code):
 		(item_code, "%.pdf"),
 	))
 
+	raw_stock = frappe.db.sql(
+		"select ifnull(sum(actual_qty), 0) from `tabBin` "
+		"where item_code = %s and warehouse = %s",
+		(item_code, RAW_MATERIALS_WAREHOUSE),
+	)[0][0]
+
+	all_stock = frappe.db.sql(
+		"select ifnull(sum(actual_qty), 0) from `tabBin` where item_code = %s",
+		item_code,
+	)[0][0]
+
+	# Open Purchase MR qty: across submitted, non-Stopped Purchase MRs,
+	# sum of (stock_qty - received_qty) clipped at zero per row.
+	open_mr = frappe.db.sql(
+		"""
+		select ifnull(sum(greatest(mri.stock_qty - ifnull(mri.received_qty, 0), 0)), 0)
+		from `tabMaterial Request Item` mri
+		join `tabMaterial Request` mr on mri.parent = mr.name
+		where mri.item_code = %s
+		  and mr.docstatus = 1
+		  and mr.material_request_type = 'Purchase'
+		  and mr.status != 'Stopped'
+		""",
+		item_code,
+	)[0][0]
+
 	return {
 		"supplier": sup.get("supplier") or "",
 		"supplier_part_no": sup.get("supplier_part_no") or "",
 		"has_active_bom": has_active_bom,
 		"has_pdf": has_pdf,
+		"raw_stock": int(round(raw_stock or 0)),
+		"forecasted": int(round((all_stock or 0) + (open_mr or 0))),
 	}
 
 
@@ -258,6 +296,8 @@ def _entity_payload(i, space):
 		f"{space}/{FIBERY_HAS_PDF_FIELD}": extra["has_pdf"],
 		f"{space}/{FIBERY_HAS_SERIAL_OR_BATCH_FIELD}":
 			bool(i.has_serial_no or i.has_batch_no),
+		f"{space}/{FIBERY_RAW_STOCK_FIELD}": extra["raw_stock"],
+		f"{space}/{FIBERY_FORECASTED_FIELD}": extra["forecasted"],
 	}
 
 

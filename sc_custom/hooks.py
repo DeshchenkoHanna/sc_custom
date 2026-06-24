@@ -167,7 +167,15 @@ doc_events = {
         "validate": "sc_custom.doctype_events.purchase_invoice.validate_purchase_invoice"
     },
     "Stock Ledger Entry": {
-        "after_insert": "sc_custom.overrides.serial_batch_storage.on_sle_after_insert"
+        "after_insert": [
+            "sc_custom.overrides.serial_batch_storage.on_sle_after_insert",
+            "sc_custom.fibery_sync.item_events.enqueue_item_from_sle"
+        ]
+    },
+    "Material Request": {
+        "on_submit": "sc_custom.fibery_sync.item_events.enqueue_items_from_mr",
+        "on_cancel": "sc_custom.fibery_sync.item_events.enqueue_items_from_mr",
+        "on_update_after_submit": "sc_custom.fibery_sync.item_events.enqueue_items_from_mr"
     },
     "Pick List": {
         "validate": "sc_custom.doctype_events.pick_list.clean_stale_sabb",
