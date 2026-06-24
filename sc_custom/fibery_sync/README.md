@@ -151,7 +151,7 @@ module constant — see top of `sync.py`):
 | `Name` (built-in) | text | `Item.item_name` |
 | `ERP Modified` (`FIBERY_MODIFIED_FIELD`) | text | `str(Item.modified)` (used by nightly reconcile as drift marker) |
 | `ERP Description` (`FIBERY_DESCRIPTION_FIELD`) | text | `Item.description` with HTML stripped (NOT the built-in rich-text "Description") |
-| `Valuation rate` (`FIBERY_VALUATION_FIELD`) | int | running weighted-average valuation across all warehouses: `SUM(stock_value) / SUM(actual_qty)` over `tabBin`. ERPNext keeps `tabBin.stock_value` and `tabBin.actual_qty` in lock-step with SLE processing, so this reflects the live per-Item average cost. Refreshes via the `Stock Ledger Entry.after_insert` hook (no Item save required). |
+| `Valuation rate` (`FIBERY_VALUATION_FIELD`) | decimal | running weighted-average valuation across all warehouses: `SUM(stock_value) / SUM(actual_qty)` over `tabBin`, sent as a float rounded to 2 decimal places. ERPNext keeps `tabBin.stock_value` and `tabBin.actual_qty` in lock-step with SLE processing, so this reflects the live per-Item average cost. Refreshes via the `Stock Ledger Entry.after_insert` hook (no Item save required). |
 | `Main supplier` (`FIBERY_MAIN_SUPPLIER_FIELD`) | text | first row (by `idx`) of `Item Supplier` child table → `supplier` (Supplier ID); `""` if no rows |
 | `Main supplier part n°` (`FIBERY_MAIN_SUPPLIER_PART_FIELD`) | text | first row of `Item Supplier` → `supplier_part_no`; `""` if no rows |
 | `Has active BOM` (`FIBERY_HAS_BOM_FIELD`) | bool | True iff a BOM exists for this item with `is_active=1` and `docstatus=1` |

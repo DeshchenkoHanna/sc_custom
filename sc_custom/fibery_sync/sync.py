@@ -48,7 +48,7 @@ OUTBOX = "Fibery Sync Queue"
 FIBERY_ITEM_CODE_FIELD = "ITM n°"                  # fibery/text — Item Code (conflict-field)
 FIBERY_MODIFIED_FIELD = "ERP Modified"             # fibery/text — ERP modified timestamp
 FIBERY_DESCRIPTION_FIELD = "ERP Description"       # fibery/text — HTML-stripped description
-FIBERY_VALUATION_FIELD = "Valuation rate"          # fibery/int — running weighted-average across tabBin (SUM(stock_value)/SUM(actual_qty))
+FIBERY_VALUATION_FIELD = "Valuation rate"          # fibery/decimal — running weighted-average across tabBin (SUM(stock_value)/SUM(actual_qty)), rounded to 2 dp
 FIBERY_MAIN_SUPPLIER_FIELD = "Main supplier"       # fibery/text — first Item Supplier row, supplier ID
 FIBERY_MAIN_SUPPLIER_PART_FIELD = "Main supplier part n°"  # fibery/text — first Item Supplier row, supplier_part_no
 FIBERY_HAS_BOM_FIELD = "Has active BOM"            # fibery/bool — has at least one active+submitted BOM
@@ -281,7 +281,7 @@ def _extra_fields(item_code):
 		"has_pdf": has_pdf,
 		"raw_stock": int(round(raw_stock or 0)),
 		"forecasted": int(round((all_stock or 0) + (open_mr or 0))),
-		"valuation_rate": int(round(valuation_rate or 0)),
+		"valuation_rate": round(float(valuation_rate or 0), 2),
 	}
 
 
