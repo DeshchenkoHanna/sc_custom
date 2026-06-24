@@ -151,7 +151,7 @@ module constant — see top of `sync.py`):
 | `Name` (built-in) | text | `Item.item_name` |
 | `ERP Modified` (`FIBERY_MODIFIED_FIELD`) | text | `str(Item.modified)` (used by nightly reconcile as drift marker) |
 | `ERP Description` (`FIBERY_DESCRIPTION_FIELD`) | text | `Item.description` with HTML stripped (NOT the built-in rich-text "Description") |
-| `Valuation rate` (`FIBERY_VALUATION_FIELD`) | int | `int(round(Item.valuation_rate))` |
+| `Valuation rate` (`FIBERY_VALUATION_FIELD`) | int | running weighted-average valuation across all warehouses: `SUM(stock_value) / SUM(actual_qty)` over `tabBin`. ERPNext keeps `tabBin.stock_value` and `tabBin.actual_qty` in lock-step with SLE processing, so this reflects the live per-Item average cost. Refreshes via the `Stock Ledger Entry.after_insert` hook (no Item save required). |
 | `Main supplier` (`FIBERY_MAIN_SUPPLIER_FIELD`) | text | first row (by `idx`) of `Item Supplier` child table → `supplier` (Supplier ID); `""` if no rows |
 | `Main supplier part n°` (`FIBERY_MAIN_SUPPLIER_PART_FIELD`) | text | first row of `Item Supplier` → `supplier_part_no`; `""` if no rows |
 | `Has active BOM` (`FIBERY_HAS_BOM_FIELD`) | bool | True iff a BOM exists for this item with `is_active=1` and `docstatus=1` |
@@ -203,13 +203,16 @@ These data sources do NOT bump `Item.modified`, so the `on_update` hook
 and the nightly reconcile (which compares `Item.modified`) will not
 auto-re-enqueue the Item after they change:
 
-- `Valuation rate` — updated by stock movements, which don't save the Item;
 - `Has active BOM` — creating/cancelling a BOM doesn't touch the Item;
 - `Has pdf attached` — attaching/removing files doesn't touch the Item.
 
-To always reflect these, the Item must be re-saved (or a dedicated hook
-added on the relevant doctype to enqueue affected items) — out of scope
-for the basic Item sync.
+(`Valuation rate`, `Current raw materials stock`, `Total forecasted stock`
+are kept fresh by the Stock Ledger Entry and Material Request hooks — no
+Item save required.)
+
+To always reflect the two above, the Item must be re-saved (or a dedicated
+hook added on the relevant doctype to enqueue affected items) — out of
+scope for the basic Item sync.
 
 ## Where to see status and history
 

@@ -48,7 +48,7 @@ OUTBOX = "Fibery Sync Queue"
 FIBERY_ITEM_CODE_FIELD = "ITM n°"                  # fibery/text — Item Code (conflict-field)
 FIBERY_MODIFIED_FIELD = "ERP Modified"             # fibery/text — ERP modified timestamp
 FIBERY_DESCRIPTION_FIELD = "ERP Description"       # fibery/text — HTML-stripped description
-FIBERY_VALUATION_FIELD = "Valuation rate"          # fibery/int — Item.valuation_rate (rounded)
+FIBERY_VALUATION_FIELD = "Valuation rate"          # fibery/int — running weighted-average across tabBin (SUM(stock_value)/SUM(actual_qty))
 FIBERY_MAIN_SUPPLIER_FIELD = "Main supplier"       # fibery/text — first Item Supplier row, supplier ID
 FIBERY_MAIN_SUPPLIER_PART_FIELD = "Main supplier part n°"  # fibery/text — first Item Supplier row, supplier_part_no
 FIBERY_HAS_BOM_FIELD = "Has active BOM"            # fibery/bool — has at least one active+submitted BOM
@@ -248,6 +248,17 @@ def _extra_fields(item_code):
 		item_code,
 	)[0][0]
 
+	# Weighted-average valuation across all warehouses where ERPNext keeps
+	# stock for this Item. tabBin.stock_value = actual_qty * valuation_rate
+	# and both are updated as SLE rows are processed, so this expression
+	# always reflects the running average. NULLIF guards against division
+	# by zero when there is no stock anywhere.
+	valuation_rate = frappe.db.sql(
+		"select ifnull(sum(stock_value) / nullif(sum(actual_qty), 0), 0) "
+		"from `tabBin` where item_code = %s",
+		item_code,
+	)[0][0]
+
 	# Open Purchase MR qty: across submitted, non-Stopped Purchase MRs,
 	# sum of (stock_qty - received_qty) clipped at zero per row.
 	open_mr = frappe.db.sql(
@@ -270,6 +281,7 @@ def _extra_fields(item_code):
 		"has_pdf": has_pdf,
 		"raw_stock": int(round(raw_stock or 0)),
 		"forecasted": int(round((all_stock or 0) + (open_mr or 0))),
+		"valuation_rate": int(round(valuation_rate or 0)),
 	}
 
 
@@ -289,7 +301,7 @@ def _entity_payload(i, space):
 		f"{space}/Name": i.item_name,
 		f"{space}/{FIBERY_MODIFIED_FIELD}": str(i.modified),
 		f"{space}/{FIBERY_DESCRIPTION_FIELD}": _plain_text(i.description),
-		f"{space}/{FIBERY_VALUATION_FIELD}": int(round(i.valuation_rate or 0)),
+		f"{space}/{FIBERY_VALUATION_FIELD}": extra["valuation_rate"],
 		f"{space}/{FIBERY_MAIN_SUPPLIER_FIELD}": extra["supplier"],
 		f"{space}/{FIBERY_MAIN_SUPPLIER_PART_FIELD}": extra["supplier_part_no"],
 		f"{space}/{FIBERY_HAS_BOM_FIELD}": extra["has_active_bom"],
@@ -569,8 +581,7 @@ def flush_queue(batch=100):
 			item = frappe.db.get_value(
 				"Item", r["item_code"],
 				["item_code", "item_name", "modified", "description",
-				 "valuation_rate", "has_serial_no", "has_batch_no",
-				 "item_group"],
+				 "has_serial_no", "has_batch_no", "item_group"],
 				as_dict=True,
 			)
 			if not item:
@@ -703,8 +714,7 @@ def sync_items(limit=5):
 		"Item",
 		filters={"item_group": ["in", list(allowed)]} if allowed else None,
 		fields=["item_code", "item_name", "modified", "description",
-		        "valuation_rate", "has_serial_no", "has_batch_no",
-		        "item_group"],
+		        "has_serial_no", "has_batch_no", "item_group"],
 		order_by="modified desc",
 		limit_page_length=limit,
 	)
@@ -734,8 +744,7 @@ def scheduled_sync():
 		"Item",
 		filters={"modified": [">", last_sync]},
 		fields=["item_code", "item_name", "modified", "description",
-		        "valuation_rate", "has_serial_no", "has_batch_no",
-		        "item_group"],
+		        "has_serial_no", "has_batch_no", "item_group"],
 		limit_page_length=500,
 	)
 	if not items:
