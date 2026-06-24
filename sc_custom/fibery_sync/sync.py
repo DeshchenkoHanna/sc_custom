@@ -238,16 +238,14 @@ def _extra_fields(item_code):
 def _entity_payload(i, space):
 	"""Build one Fibery entity dict for the given Item dict.
 
-	The ``Item group`` Single Select is sent only when the ERP
-	``item_group`` value matches an existing option name in Fibery
-	(checked at send time against the live enum, cached 5 min). When
-	there is no matching option the field is omitted, leaving whatever
-	value (if any) already exists in Fibery untouched. So adding a new
-	option in Fibery + a matching Item Group in ERP starts syncing
-	automatically — no code change required.
+	NB: ``Item group`` (Single Select) is NOT set here. Fibery's batch
+	create-or-update silently ignores Single Select values (the field is
+	modelled internally as a back-reference collection on the enum type).
+	The Item group value is set separately via collection commands in
+	:func:`_build_upsert_command`.
 	"""
 	extra = _extra_fields(i.item_code)
-	payload = {
+	return {
 		"fibery/id": _fibery_id(i.item_code),
 		f"{space}/{FIBERY_ITEM_CODE_FIELD}": i.item_code,
 		f"{space}/Name": i.item_name,
@@ -261,25 +259,66 @@ def _entity_payload(i, space):
 		f"{space}/{FIBERY_HAS_SERIAL_OR_BATCH_FIELD}":
 			bool(i.has_serial_no or i.has_batch_no),
 	}
+
+
+def _item_group_commands(items, space, database):
+	"""Emit the collection commands needed to set the Item group Single
+	Select for the given Items.
+
+	For each Item whose item_group maps to a known Fibery option, emit
+	a remove-collection-items (sweeping ALL known options off the entity,
+	idempotent for absent options) followed by an add-collection-items
+	for the target. This is required because Fibery's Single Select is
+	implemented as a collection internally — repeated ``add`` accumulates,
+	so the old option must be explicitly removed first.
+
+	Items whose item_group is not in the live Fibery option set emit no
+	commands — the field on Fibery side is left untouched.
+	"""
 	options = _fibery_item_group_options()
-	option_id = options.get(i.item_group) if i.item_group else None
-	if option_id:
-		# Fibery Single Select expects an entity reference, NOT a plain
-		# string. Passing the option's fibery/id makes Fibery resolve to
-		# the right enum entity.
-		payload[f"{space}/{FIBERY_ITEM_GROUP_FIELD}"] = {"fibery/id": option_id}
-	return payload
+	if not options:
+		return []
+	db_type = f"{space}/{database}"
+	ig_field = f"{space}/{FIBERY_ITEM_GROUP_FIELD}"
+	all_option_items = [{"fibery/id": v} for v in options.values()]
+
+	cmds = []
+	for i in items:
+		target_id = options.get(i.item_group) if i.item_group else None
+		if not target_id:
+			continue
+		entity_ref = {"fibery/id": _fibery_id(i.item_code)}
+		cmds.append({
+			"command": "fibery.entity/remove-collection-items",
+			"args": {
+				"type": db_type,
+				"entity": entity_ref,
+				"field": ig_field,
+				"items": all_option_items,
+			},
+		})
+		cmds.append({
+			"command": "fibery.entity/add-collection-items",
+			"args": {
+				"type": db_type,
+				"entity": entity_ref,
+				"field": ig_field,
+				"items": [{"fibery/id": target_id}],
+			},
+		})
+	return cmds
 
 
 def _build_upsert_command(items, space, database):
-	"""Build the Fibery create-or-update batch command for the given items.
+	"""Build the full Fibery command list to upsert the given items.
 
-	Uses ``fibery.entity.batch/create-or-update`` with
-	``FIBERY_ITEM_CODE_FIELD`` as the conflict field and ``update-latest``
-	so existing rows are refreshed rather than duplicated. See
-	:func:`_entity_payload` for the field set actually sent.
+	Returns a list of commands sent in a single ``/api/commands`` POST:
+	one ``fibery.entity.batch/create-or-update`` for all scalar fields,
+	followed by pairs of ``remove-collection-items`` /
+	``add-collection-items`` per item to set the Single Select
+	``Item group`` (see :func:`_item_group_commands`).
 	"""
-	return [
+	cmds = [
 		{
 			"command": "fibery.entity.batch/create-or-update",
 			"args": {
@@ -290,6 +329,8 @@ def _build_upsert_command(items, space, database):
 			},
 		}
 	]
+	cmds.extend(_item_group_commands(items, space, database))
+	return cmds
 
 
 def _post_to_fibery(host, token, commands):
@@ -311,12 +352,16 @@ def _post_to_fibery(host, token, commands):
 
 
 def _is_success(status, body):
-	"""Fibery returns HTTP 200 with [{"success": true, ...}] on success."""
+	"""HTTP 200 and every command in the response returned ``success: true``.
+
+	Fibery's ``/api/commands`` runs multiple commands sequentially and
+	returns one result per command. We require all of them to succeed.
+	"""
 	return (
 		status == 200
 		and isinstance(body, list)
 		and body
-		and body[0].get("success") is True
+		and all(r.get("success") is True for r in body)
 	)
 
 
@@ -340,13 +385,15 @@ def _classify_error(status, body, exc):
 			detail = body.get("name") or body.get("message") or ""
 		return f"HTTP_{status}", (detail or str(body))[:140]
 
-	if isinstance(body, list) and body and body[0].get("success") is False:
-		# Fibery nests the error under result: {name, message, ...}
-		res = body[0].get("result")
-		res = res if isinstance(res, dict) else {}
-		name = res.get("name") or body[0].get("name") or "unknown"
-		msg = res.get("message") or str(body[0])
-		return f"FIBERY:{name}", msg[:140]
+	if isinstance(body, list) and body:
+		# Find the first failing command in the response and surface it.
+		for r in body:
+			if r.get("success") is False:
+				res = r.get("result")
+				res = res if isinstance(res, dict) else {}
+				name = res.get("name") or r.get("name") or "unknown"
+				msg = res.get("message") or str(r)
+				return f"FIBERY:{name}", msg[:140]
 
 	return "UNKNOWN", str(body)[:140]
 
