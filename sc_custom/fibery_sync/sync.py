@@ -135,20 +135,23 @@ def _allowed_item_groups():
 
 
 def _fibery_item_group_options():
-	"""Cached set of available option names for the Fibery 'Item group'
+	"""Cached ``{option_name: fibery/id}`` map for the Fibery 'Item group'
 	Single Select on the target database.
 
-	Fetched once every 5 minutes by querying the enum entity type. If the
-	fetch fails (Fibery unreachable, schema changed, etc.) we return the
-	empty set — callers then omit the Item group field from the payload,
-	which is safer than guessing and getting an option-not-found error.
+	A Single Select in Fibery is a reference to an entity in an enum
+	type; the API accepts it as ``{"fibery/id": "<uuid>"}``, NOT as a
+	plain string. We fetch the (name, fibery/id) pairs once every 5
+	minutes and cache them so per-item lookups during a flush are free.
+	If the fetch fails (Fibery unreachable, schema changed, etc.) we
+	return an empty dict — callers then omit the Item group field, which
+	is safer than guessing.
 	"""
 	cache_key = "fibery_sync_item_group_options"
 	cached = frappe.cache().get_value(cache_key)
 	if cached is not None:
-		return set(cached)
+		return dict(cached)
 
-	options = set()
+	options = {}
 	try:
 		host, token, space, database = _get_conf()
 		# Fibery's naming convention for a single-select enum type:
@@ -158,22 +161,23 @@ def _fibery_item_group_options():
 			"command": "fibery.entity/query",
 			"args": {"query": {
 				"q/from": enum_type,
-				"q/select": ["enum/name"],
+				"q/select": ["fibery/id", "enum/name"],
 				"q/limit": 1000,
 			}},
 		}]
 		status, body = _post_to_fibery(host, token, cmd)
 		if _is_success(status, body):
 			for r in body[0].get("result") or []:
-				n = r.get("enum/name")
-				if n:
-					options.add(n)
+				name = r.get("enum/name")
+				fid = r.get("fibery/id")
+				if name and fid:
+					options[name] = fid
 	except Exception:
 		# Don't break sync over a transient schema-fetch failure.
-		options = set()
+		options = {}
 
-	# Cache empty set too — short TTL means we'll retry within 5 min.
-	frappe.cache().set_value(cache_key, list(options), expires_in_sec=300)
+	# Cache empty too — short TTL means we'll retry within 5 min.
+	frappe.cache().set_value(cache_key, options, expires_in_sec=300)
 	return options
 
 
@@ -257,8 +261,13 @@ def _entity_payload(i, space):
 		f"{space}/{FIBERY_HAS_SERIAL_OR_BATCH_FIELD}":
 			bool(i.has_serial_no or i.has_batch_no),
 	}
-	if i.item_group and i.item_group in _fibery_item_group_options():
-		payload[f"{space}/{FIBERY_ITEM_GROUP_FIELD}"] = i.item_group
+	options = _fibery_item_group_options()
+	option_id = options.get(i.item_group) if i.item_group else None
+	if option_id:
+		# Fibery Single Select expects an entity reference, NOT a plain
+		# string. Passing the option's fibery/id makes Fibery resolve to
+		# the right enum entity.
+		payload[f"{space}/{FIBERY_ITEM_GROUP_FIELD}"] = {"fibery/id": option_id}
 	return payload
 
 
