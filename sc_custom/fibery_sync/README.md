@@ -158,8 +158,8 @@ module constant — see top of `sync.py`):
 | `Has pdf attached` (`FIBERY_HAS_PDF_FIELD`) | bool | True iff at least one File is attached to the Item whose `file_name` ends with `.pdf` (case-insensitive — extension check, no MIME sniff) |
 | `Has serial or batch n°` (`FIBERY_HAS_SERIAL_OR_BATCH_FIELD`) | bool | `Item.has_serial_no or Item.has_batch_no` |
 | `Item group` (`FIBERY_ITEM_GROUP_FIELD`) | single-select | `Item.item_group` if it matches an existing Fibery option name (see below) |
-| `Current raw materials stock` (`FIBERY_RAW_STOCK_FIELD`) | int | `SUM(actual_qty)` over `tabBin` filtered to warehouse `RAW_MATERIALS_WAREHOUSE` (default `"Raw Materials - SC"`) |
-| `Total forecasted stock` (`FIBERY_FORECASTED_FIELD`) | int | all-warehouse stock (`SUM(actual_qty)` over `tabBin`) + open Purchase Material Request qty (`SUM(GREATEST(stock_qty − received_qty, 0))` over submitted, non-Stopped Purchase MR rows) |
+| `Current raw materials stock` (`FIBERY_RAW_STOCK_FIELD`) | decimal | `SUM(actual_qty)` over `tabBin` filtered to warehouse `RAW_MATERIALS_WAREHOUSE` (default `"Raw Materials - SC"`), sent as float rounded to 2 dp |
+| `Total forecasted stock` (`FIBERY_FORECASTED_FIELD`) | decimal | all-warehouse stock (`SUM(actual_qty)` over `tabBin`) + open Purchase Material Request qty (`SUM(GREATEST(stock_qty − received_qty, 0))` over submitted, non-Stopped Purchase MR rows), sent as float rounded to 2 dp |
 
 All listed Fibery fields **must exist** in the target database with the
 shown type. Rename a field in Fibery → edit the matching constant.

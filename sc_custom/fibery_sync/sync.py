@@ -55,8 +55,8 @@ FIBERY_HAS_BOM_FIELD = "Has active BOM"            # fibery/bool — has at leas
 FIBERY_HAS_PDF_FIELD = "Has pdf attached"          # fibery/bool — has at least one attached file with .pdf extension
 FIBERY_HAS_SERIAL_OR_BATCH_FIELD = "Has serial or batch n°"  # fibery/bool — has_serial_no OR has_batch_no
 FIBERY_ITEM_GROUP_FIELD = "Item group"             # fibery single-select — option name matched dynamically
-FIBERY_RAW_STOCK_FIELD = "Current raw materials stock"  # fibery/int — SUM(actual_qty) in RAW_MATERIALS_WAREHOUSE only
-FIBERY_FORECASTED_FIELD = "Total forecasted stock"      # fibery/int — all-warehouse stock + open Purchase MR qty
+FIBERY_RAW_STOCK_FIELD = "Current raw materials stock"  # fibery/decimal — SUM(actual_qty) in RAW_MATERIALS_WAREHOUSE only, rounded to 2 dp
+FIBERY_FORECASTED_FIELD = "Total forecasted stock"      # fibery/decimal — all-warehouse stock + open Purchase MR qty, rounded to 2 dp
 
 # Warehouse name that "Current raw materials stock" filters to.
 RAW_MATERIALS_WAREHOUSE = "Raw Materials - SC"
@@ -279,8 +279,8 @@ def _extra_fields(item_code):
 		"supplier_part_no": sup.get("supplier_part_no") or "",
 		"has_active_bom": has_active_bom,
 		"has_pdf": has_pdf,
-		"raw_stock": int(round(raw_stock or 0)),
-		"forecasted": int(round((all_stock or 0) + (open_mr or 0))),
+		"raw_stock": round(float(raw_stock or 0), 2),
+		"forecasted": round(float((all_stock or 0) + (open_mr or 0)), 2),
 		"valuation_rate": round(float(valuation_rate or 0), 2),
 	}
 
