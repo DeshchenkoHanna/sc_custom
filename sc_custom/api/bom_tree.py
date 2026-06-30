@@ -3,8 +3,11 @@ from frappe.utils import sbool
 
 
 @frappe.whitelist()
-def get_used_in_boms(item_code, parent=None, is_root=False):
+def get_used_in_boms(item_code=None, parent=None, is_root=False):
 	is_root = sbool(is_root)
+
+	if not item_code and not parent:
+		return []
 
 	if is_root:
 		return _get_root_boms(item_code)
