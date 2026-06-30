@@ -1,5 +1,8 @@
 frappe.ui.form.on("Item", {
 	refresh(frm) {
+		// Skip for unsaved items — there is no item_code yet and the tree
+		// would call get_used_in_boms without it (e.g. "Go to full window").
+		if (frm.is_new() || !frm.doc.item_code) return;
 		if (!frm.doc.include_item_in_manufacturing) return;
 
 		sc_custom.bom_tree.setup(frm);
