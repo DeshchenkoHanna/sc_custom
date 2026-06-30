@@ -32,15 +32,29 @@ is intentionally NOT the built-in rich-text "Description".
 """
 
 import json
+import os
 import uuid
 
 import requests
+from filelock import FileLock, Timeout
 
 import frappe
-from frappe.utils import now
+from frappe.utils import get_site_path, now
 
 FIBERY_TIMEOUT = 60
 OUTBOX = "Fibery Sync Queue"
+
+# Only one drainer may touch the outbox at a time. The every-minute
+# flush_queue() and the large post-reconcile drain both acquire this file
+# lock; the minute tick takes it non-blocking (skips if busy) while reconcile
+# takes it blocking. This makes concurrent draining impossible, so rows are
+# never double-POSTed to Fibery and the success-path DELETE never races.
+_FLUSH_LOCK_NAME = "fibery_flush"
+
+# Batch size for the single large drain kicked off at the end of the nightly
+# reconcile(), so freshly-enqueued drift is delivered at once instead of
+# dribbling out 100-at-a-time over the following minutes.
+RECONCILE_FLUSH_BATCH = 5000
 
 # Fibery target field names. Centralised here so a Fibery rename is a
 # single-line edit in code, not a per-site site_config.json change.
@@ -78,6 +92,13 @@ _FIBERY_ID_NAMESPACE = uuid.UUID("6f1e7c2a-4b3d-5e6f-8a9b-0c1d2e3f4a5b")
 def _fibery_id(item_code):
 	"""Deterministic UUID for an item_code (uuid5 over a fixed namespace)."""
 	return str(uuid.uuid5(_FIBERY_ID_NAMESPACE, item_code))
+
+
+def _flush_lock_path():
+	"""Absolute path of the site-scoped drainer lockfile (see _FLUSH_LOCK_NAME)."""
+	path = os.path.abspath(get_site_path("locks", _FLUSH_LOCK_NAME + ".lock"))
+	os.makedirs(os.path.dirname(path), exist_ok=True)
+	return path
 
 
 def _get_conf():
@@ -523,7 +544,7 @@ def requeue_failed():
 
 
 # --------------------------------------------------------------------------
-# Drainer — the only thing that talks to Fibery (scheduler, every 5 min)
+# Drainer — the only thing that talks to Fibery (scheduler, every minute)
 # --------------------------------------------------------------------------
 
 
@@ -554,12 +575,18 @@ def _pick_batch(batch):
 	)
 
 
-def flush_queue(batch=100):
-	"""Scheduler drainer: deliver queued items to Fibery.
+def flush_queue(batch=50):
+	"""Scheduler drainer (every minute): deliver queued items to Fibery.
 
-	Success (HTTP 200 + body success) -> DELETE the row (queue, not log).
-	Failure -> status=Error, retry++, error_code, last_error, log_error.
-	Each row is isolated and committed independently.
+	Default batch is 50: measured throughput is ~0.76s/item (one HTTP POST
+	per item), so 50 items drain in ~38s — comfortably inside the 1-minute
+	tick. (100 took ~76s and overran the minute.)
+
+	Acquires the shared drainer lock NON-BLOCKING: if another drain is
+	already running (e.g. the large post-reconcile flush, or a previous tick
+	that overran), this tick skips and tries again next minute. Two drainers
+	must never run at once — they would double-POST rows and race on the
+	success-path row deletion.
 	"""
 	try:
 		host, token, space, database = _get_conf()
@@ -568,6 +595,22 @@ def flush_queue(batch=100):
 		frappe.log_error(title="Fibery Sync", message="Fibery not configured")
 		return
 
+	try:
+		with FileLock(_flush_lock_path(), timeout=0):
+			_drain(batch, host, token, space, database)
+	except Timeout:
+		# Another drain holds the lock; leave the work for the next tick.
+		return
+
+
+def _drain(batch, host, token, space, database):
+	"""Deliver up to ``batch`` queued rows to Fibery. Returns rows attempted.
+
+	The CALLER MUST hold the drainer file lock — this function does no
+	locking of its own. Success (HTTP 200 + body success) -> DELETE the row
+	(queue, not log). Failure -> status=Error, retry++, error_code,
+	last_error, log_error. Each row is isolated and committed independently.
+	"""
 	rows = _pick_batch(batch)
 	for r in rows:
 		name = r["name"]
@@ -620,6 +663,8 @@ def flush_queue(batch=100):
 			message=f"{r['item_code']}: {code}\n{text}",
 		)
 
+	return len(rows)
+
 
 # --------------------------------------------------------------------------
 # Reconcile — nightly second producer (full drift sweep into the outbox)
@@ -627,12 +672,22 @@ def flush_queue(batch=100):
 
 
 def _fibery_snapshot(host, token, space, database):
-	"""Page through Fibery and return {item_code: modified_str}."""
+	"""Page through Fibery and return ``{item_code: {...}}``.
+
+	Each value holds the fields reconcile() compares against live ERP data:
+	``modified`` (ERP modified timestamp), ``raw`` (current raw-materials
+	stock), ``fc`` (total forecasted stock), ``val`` (valuation rate). The
+	last three are pulled so reconcile can detect stock/valuation drift,
+	which does NOT bump Item.modified.
+	"""
 	snapshot = {}
 	offset = 0
 	page = 1000
 	ic_field = f"{space}/{FIBERY_ITEM_CODE_FIELD}"
 	md_field = f"{space}/{FIBERY_MODIFIED_FIELD}"
+	raw_field = f"{space}/{FIBERY_RAW_STOCK_FIELD}"
+	fc_field = f"{space}/{FIBERY_FORECASTED_FIELD}"
+	val_field = f"{space}/{FIBERY_VALUATION_FIELD}"
 	while True:
 		commands = [
 			{
@@ -640,7 +695,7 @@ def _fibery_snapshot(host, token, space, database):
 				"args": {
 					"query": {
 						"q/from": f"{space}/{database}",
-						"q/select": [ic_field, md_field],
+						"q/select": [ic_field, md_field, raw_field, fc_field, val_field],
 						"q/limit": page,
 						"q/offset": offset,
 					}
@@ -658,17 +713,83 @@ def _fibery_snapshot(host, token, space, database):
 		for ent in result:
 			code = ent.get(ic_field)
 			if code:
-				snapshot[code] = ent.get(md_field)
+				snapshot[code] = {
+					"modified": ent.get(md_field),
+					"raw": ent.get(raw_field),
+					"fc": ent.get(fc_field),
+					"val": ent.get(val_field),
+				}
 		if len(result) < page:
 			break
 		offset += page
 	return snapshot
 
 
+# Two numeric values are "equal" if they match to 2 dp — the same precision
+# we store in Fibery. Comparing raw floats would flag rounding noise as drift
+# and re-enqueue items every night, so reconcile() uses this tolerance.
+NUMERIC_DRIFT_TOL = 0.005
+
+
+def _to_num(x):
+	"""Coerce a Fibery numeric (may be None / str / number) to float; None -> 0."""
+	try:
+		return float(x)
+	except (TypeError, ValueError):
+		return 0.0
+
+
+def _bulk_stock_maps():
+	"""Aggregate the stock/valuation/MR figures for ALL items in a few
+	grouped queries, so reconcile() can compare them without running the
+	per-item ``_extra_fields`` 2k+ times.
+
+	Returns four dicts keyed by item_code (missing items simply absent,
+	treated as 0 by the caller):
+	  raw_qty   : SUM(actual_qty) in RAW_MATERIALS_WAREHOUSE
+	  all_qty   : SUM(actual_qty) across all warehouses
+	  val_ratio : SUM(stock_value)/NULLIF(SUM(actual_qty),0) across all wh
+	  open_mr   : open Purchase-MR qty (same formula as _extra_fields)
+
+	Sums are returned UNROUNDED — the caller applies Python round(...,2)
+	exactly like _entity_payload/_extra_fields, so the compared value
+	matches what would actually be sent (avoids a rounding-method mismatch
+	that would otherwise re-enqueue the same items forever).
+	"""
+	raw_qty = dict(frappe.db.sql(
+		"select item_code, sum(actual_qty) from `tabBin` "
+		"where warehouse=%s group by item_code",
+		RAW_MATERIALS_WAREHOUSE,
+	))
+	all_rows = frappe.db.sql(
+		"select item_code, sum(actual_qty), "
+		"sum(stock_value)/nullif(sum(actual_qty),0) "
+		"from `tabBin` group by item_code"
+	)
+	all_qty = {r[0]: r[1] for r in all_rows}
+	val_ratio = {r[0]: r[2] for r in all_rows}
+	open_mr = dict(frappe.db.sql(
+		"""
+		select mri.item_code,
+		       sum(greatest(mri.stock_qty - ifnull(mri.received_qty, 0), 0))
+		from `tabMaterial Request Item` mri
+		join `tabMaterial Request` mr on mri.parent = mr.name
+		where mr.docstatus = 1
+		  and mr.material_request_type = 'Purchase'
+		  and mr.status != 'Stopped'
+		group by mri.item_code
+		"""
+	))
+	return raw_qty, all_qty, val_ratio, open_mr
+
+
 def reconcile():
-	"""Nightly: enqueue any Item missing in Fibery or whose stored ERP
-	modified timestamp differs from the current one. Only enqueues — the
-	drainer delivers. Items outside SYNC_ITEM_GROUP_ROOTS are skipped."""
+	"""Nightly: enqueue any Item that has drifted from Fibery. Drift =
+	missing in Fibery, OR a differing ERP modified timestamp, OR raw stock /
+	forecasted stock / valuation rate differing by more than
+	NUMERIC_DRIFT_TOL. The numeric checks catch stock/valuation changes that
+	don't bump Item.modified. Only enqueues — the drainer delivers. Items
+	outside SYNC_ITEM_GROUP_ROOTS are skipped."""
 	host, token, space, database = _get_conf()
 
 	fib = _fibery_snapshot(host, token, space, database)
@@ -680,18 +801,50 @@ def reconcile():
 		return {"checked": len(fib), "enqueued": 0,
 		        "warning": "no item groups matched SYNC_ITEM_GROUP_ROOTS"}
 
+	raw_qty, all_qty, val_ratio, open_mr = _bulk_stock_maps()
+
 	enqueued = 0
 	for it in frappe.get_all(
 		"Item",
 		filters={"item_group": ["in", list(allowed)]},
 		fields=["name", "modified"],
 	):
-		current = str(it.modified)
-		if it.name not in fib or fib.get(it.name) != current:
-			enqueue_item(it.name)
+		name = it.name
+		# Live ERP values, rounded exactly as _entity_payload sends them.
+		erp_raw = round(float(raw_qty.get(name) or 0), 2)
+		erp_fc = round(float((all_qty.get(name) or 0) + (open_mr.get(name) or 0)), 2)
+		erp_val = round(float(val_ratio.get(name) or 0), 2)
+
+		fibrow = fib.get(name)
+		drift = (
+			fibrow is None
+			or str(fibrow.get("modified")) != str(it.modified)
+			or abs(erp_raw - _to_num(fibrow.get("raw"))) > NUMERIC_DRIFT_TOL
+			or abs(erp_fc - _to_num(fibrow.get("fc"))) > NUMERIC_DRIFT_TOL
+			or abs(erp_val - _to_num(fibrow.get("val"))) > NUMERIC_DRIFT_TOL
+		)
+		if drift:
+			enqueue_item(name)
 			enqueued += 1
 	frappe.db.commit()
-	return {"checked": len(fib), "enqueued": enqueued}
+
+	# Deliver the drift just enqueued in one large drain, rather than waiting
+	# for the every-minute flush_queue() to dribble it out. Take the drainer
+	# lock BLOCKING so this never overlaps a minute tick — while we hold it,
+	# minute ticks skip; if a minute tick is mid-run we wait for it. If the
+	# lock can't be had within the timeout, leave the rows for the minute
+	# drainer rather than risk a concurrent drain.
+	drained = 0
+	try:
+		with FileLock(_flush_lock_path(), timeout=300):
+			drained = _drain(RECONCILE_FLUSH_BATCH, host, token, space, database)
+	except Timeout:
+		frappe.log_error(
+			title="Fibery Sync",
+			message="reconcile: drainer lock busy >300s; left drift for the "
+			"every-minute flush_queue",
+		)
+	return {"checked": len(fib), "enqueued": enqueued, "drained": drained}
 
 
 # --------------------------------------------------------------------------

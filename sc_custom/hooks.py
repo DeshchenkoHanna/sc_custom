@@ -229,11 +229,15 @@ fixtures = [
 
 scheduler_events = {
     "cron": {
-        # Drain the Fibery Sync Queue outbox every 5 minutes.
-        "*/5 * * * *": [
+        # Drain the Fibery Sync Queue outbox every minute. Concurrent runs are
+        # prevented by a file lock in flush_queue(), so an overrun just causes
+        # the next tick to skip rather than double-send.
+        "* * * * *": [
             "sc_custom.fibery_sync.sync.flush_queue"
         ],
-        # Nightly full drift reconciliation (re-enqueues into the outbox).
+        # Nightly full drift reconciliation: re-enqueues into the outbox, then
+        # does one large drain under the same lock (never overlaps the minute
+        # tick).
         "0 2 * * *": [
             "sc_custom.fibery_sync.sync.reconcile"
         ],
