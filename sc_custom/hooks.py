@@ -167,7 +167,15 @@ doc_events = {
         "validate": "sc_custom.doctype_events.purchase_invoice.validate_purchase_invoice"
     },
     "Stock Ledger Entry": {
-        "after_insert": "sc_custom.overrides.serial_batch_storage.on_sle_after_insert"
+        "after_insert": [
+            "sc_custom.overrides.serial_batch_storage.on_sle_after_insert",
+            "sc_custom.fibery_sync.item_events.enqueue_item_from_sle"
+        ]
+    },
+    "Material Request": {
+        "on_submit": "sc_custom.fibery_sync.item_events.enqueue_items_from_mr",
+        "on_cancel": "sc_custom.fibery_sync.item_events.enqueue_items_from_mr",
+        "on_update_after_submit": "sc_custom.fibery_sync.item_events.enqueue_items_from_mr"
     },
     "Pick List": {
         "validate": "sc_custom.doctype_events.pick_list.clean_stale_sabb",
@@ -181,6 +189,9 @@ doc_events = {
         "validate": "sc_custom.doctype_events.subcontracting_receipt.validate_subcontracting_receipt",
         "before_submit": "sc_custom.doctype_events.subcontracting_receipt.before_submit_subcontracting_receipt",
         "on_submit": "sc_custom.doctype_events.subcontracting_receipt.on_submit_subcontracting_receipt"
+    },
+    "Item": {
+        "on_update": "sc_custom.fibery_sync.item_events.enqueue_item_for_fibery"
     }
 }
 
@@ -216,23 +227,22 @@ fixtures = [
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"all": [
-# 		"sc_custom.tasks.all"
-# 	],
-# 	"daily": [
-# 		"sc_custom.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"sc_custom.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"sc_custom.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"sc_custom.tasks.monthly"
-# 	],
-# }
+scheduler_events = {
+    "cron": {
+        # Drain the Fibery Sync Queue outbox every minute. Concurrent runs are
+        # prevented by a file lock in flush_queue(), so an overrun just causes
+        # the next tick to skip rather than double-send.
+        "* * * * *": [
+            "sc_custom.fibery_sync.sync.flush_queue"
+        ],
+        # Nightly full drift reconciliation: re-enqueues into the outbox, then
+        # does one large drain under the same lock (never overlaps the minute
+        # tick).
+        "0 2 * * *": [
+            "sc_custom.fibery_sync.sync.reconcile"
+        ],
+    }
+}
 
 # Testing
 # -------
