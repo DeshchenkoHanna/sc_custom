@@ -26,7 +26,11 @@ app_license = "mit"
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/sc_custom/css/sc_custom.css"
-app_include_js = "/assets/sc_custom/js/serial_batch_selector.js"
+app_include_js = [
+	"/assets/sc_custom/js/serial_batch_selector.js",
+	# Render new comments immediately (v16 shows them only after refresh)
+	"/assets/sc_custom/js/comment_timeline_fix.js",
+]
 
 # include js, css files in header of web template
 # web_include_css = "/assets/sc_custom/css/sc_custom.css"
