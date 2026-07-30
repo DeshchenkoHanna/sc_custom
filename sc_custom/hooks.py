@@ -281,6 +281,11 @@ scheduler_events = {
 # before_request = ["sc_custom.utils.before_request"]
 # after_request = ["sc_custom.utils.after_request"]
 
+# Allow non-System-Manager users to run reports with Link->DocType filters
+# (e.g. Serial and Batch Summary voucher_type); see overrides/query_report_patch.py
+before_request = ["sc_custom.overrides.query_report_patch.apply_patch"]
+before_job = ["sc_custom.overrides.query_report_patch.apply_patch"]
+
 # Job Events
 # ----------
 # before_job = ["sc_custom.utils.before_job"]
