@@ -221,7 +221,13 @@ fixtures = [
                     "Item-custom_used_in_boms_html",
                     "BOM-custom_section_break_rnvev",
                     "BOM-custom_wo_comments",
-                    "Work Order-custom_bom_comments"
+                    "Work Order-custom_bom_comments",
+                    "Stock Entry-custom_fetch_stock_section",
+                    "Stock Entry-custom_fetch_warehouse",
+                    "Stock Entry-custom_fetch_stock_cb",
+                    "Stock Entry-custom_fetch_storage",
+                    "Stock Entry-custom_fetch_stock_btn",
+                    "Stock Entry-custom_fetch_stock_end_section"
                 ]
             ]
         ]

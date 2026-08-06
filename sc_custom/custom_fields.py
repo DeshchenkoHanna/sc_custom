@@ -162,6 +162,55 @@ def create_sc_custom_fields():
                 "insert_after": "supplier_warehouse",
                 "translatable": 0
             }
+        ],
+        "Stock Entry": [
+            {
+                "fieldname": "custom_fetch_stock_section",
+                "label": "Fetch Stock",
+                "fieldtype": "Section Break",
+                "insert_after": "scan_barcode",
+                "depends_on": "eval:['Manufacture','Repack'].includes(doc.purpose)",
+                "collapsible": 1,
+                "translatable": 0
+            },
+            {
+                "fieldname": "custom_fetch_warehouse",
+                "label": "Warehouse",
+                "fieldtype": "Link",
+                "options": "Warehouse",
+                "insert_after": "custom_fetch_stock_section",
+                "translatable": 0
+            },
+            {
+                "fieldname": "custom_fetch_stock_cb",
+                "fieldtype": "Column Break",
+                "insert_after": "custom_fetch_warehouse",
+                "translatable": 0
+            },
+            {
+                "fieldname": "custom_fetch_storage",
+                "label": "Storage",
+                "fieldtype": "Link",
+                "options": "Storage",
+                "insert_after": "custom_fetch_stock_cb",
+                "translatable": 0
+            },
+            {
+                "fieldname": "custom_fetch_stock_btn",
+                "label": "Fetch Stock",
+                "fieldtype": "Button",
+                "insert_after": "custom_fetch_storage",
+                "translatable": 0
+            },
+            {
+                # Closes the Fetch Stock section so the Items table stays in its
+                # own (always-visible) section — the depends_on above must not
+                # hide the grid.
+                "fieldname": "custom_fetch_stock_end_section",
+                "fieldtype": "Section Break",
+                "insert_after": "custom_fetch_stock_btn",
+                "translatable": 0
+            }
         ]
     }
 

@@ -53,6 +53,20 @@ frappe.ui.form.on('Stock Entry', {
 				filters: filters,
 			};
 		});
+
+		// Fetch Stock: limit warehouse picker to non-group warehouses of the company
+		frm.set_query("custom_fetch_warehouse", (frm) => {
+			return {
+				filters: {
+					is_group: 0,
+					company: frm.doc.company,
+				},
+			};
+		});
+	},
+
+	custom_fetch_stock_btn: function(frm) {
+		fetch_stock(frm);
 	},
 
 	before_submit: function(frm) {
@@ -111,6 +125,104 @@ frappe.ui.form.on('Stock Entry', {
 		}
 	}
 });
+
+/**
+ * Fetch Stock: load all items on hand at the selected Warehouse + Storage
+ * into the Items table as source (consumed) rows. Batches/serials are
+ * pre-selected from that storage via the row serial/batch fields.
+ */
+function fetch_stock(frm) {
+	// Read from the controls directly (with frm.doc fallback): clicking the
+	// button can fire before an adjacent Link field commits its selected value
+	// to frm.doc, which would otherwise read as empty.
+	const read_field = (fieldname) => {
+		const ctrl = frm.fields_dict[fieldname];
+		const val = ctrl && ctrl.get_value ? ctrl.get_value() : null;
+		return val || frm.doc[fieldname];
+	};
+
+	const warehouse = read_field("custom_fetch_warehouse");
+	const storage = read_field("custom_fetch_storage");
+
+	if (!warehouse || !storage) {
+		frappe.msgprint(__("Please select both Warehouse and Storage."));
+		return;
+	}
+
+	const load = (replace) => {
+		frappe.call({
+			method: "sc_custom.api.fetch_stock.get_stock_items_by_storage",
+			args: { warehouse, storage, parent_doc: frm.doc },
+			freeze: true,
+			freeze_message: __("Fetching stock…"),
+			callback: (r) => {
+				const items = r.message || [];
+				if (!items.length) {
+					frappe.msgprint(__("No stock found at the selected Warehouse and Storage."));
+					return;
+				}
+
+				if (replace) {
+					frm.clear_table("items");
+				}
+
+				const existing = new Set(
+					(frm.doc.items || []).map((d) => d.item_code)
+				);
+
+				let added = 0;
+				items.forEach((data) => {
+					if (!replace && existing.has(data.item_code)) return;
+					const row = frm.add_child("items", data);
+					// add_child ignores fields not in the meta on some versions;
+					// set the key populated fields explicitly to be safe.
+					Object.assign(row, data);
+					added += 1;
+				});
+
+				frm.refresh_field("items");
+
+				// Recompute rate, amount and availability exactly as ERPNext
+				// does automatically (the "Update Rate and Availability" flow).
+				// This resolves outgoing rates against each row's batch/bundle.
+				frm.call({ method: "get_stock_and_rate", doc: frm.doc }).then(() => {
+					frm.refresh_field("items");
+					frm.dirty();
+					frappe.show_alert({
+						message: __("Fetched {0} item(s).", [added]),
+						indicator: "green",
+					});
+				});
+			},
+		});
+	};
+
+	if (frm.doc.items && frm.doc.items.length) {
+		const d = new frappe.ui.Dialog({
+			title: __("Items table is not empty"),
+			fields: [
+				{
+					fieldtype: "HTML",
+					fieldname: "msg",
+					options: `<p>${__("Replace the existing rows, or append the fetched items (skipping items already present)?")}</p>`,
+				},
+			],
+			primary_action_label: __("Replace"),
+			primary_action: () => {
+				d.hide();
+				load(true);
+			},
+			secondary_action_label: __("Append"),
+			secondary_action: () => {
+				d.hide();
+				load(false);
+			},
+		});
+		d.show();
+	} else {
+		load(true);
+	}
+}
 
 /**
  * Get resolved wip_storage and fg_storage:
