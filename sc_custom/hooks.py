@@ -30,6 +30,7 @@ app_include_js = [
 	"/assets/sc_custom/js/serial_batch_selector.js",
 	# Render new comments immediately (v16 shows them only after refresh)
 	"/assets/sc_custom/js/comment_timeline_fix.js",
+	"/assets/sc_custom/js/item_quick_entry.js",
 ]
 
 # include js, css files in header of web template
@@ -195,6 +196,7 @@ doc_events = {
         "on_submit": "sc_custom.doctype_events.subcontracting_receipt.on_submit_subcontracting_receipt"
     },
     "Item": {
+        "before_validate": "sc_custom.doctype_events.item.sync_default_supplier_with_supplier_items",
         "on_update": "sc_custom.fibery_sync.item_events.enqueue_item_for_fibery"
     }
 }

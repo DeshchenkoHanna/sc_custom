@@ -9,6 +9,74 @@ frappe.ui.form.on("Item", {
 	},
 });
 
+frappe.ui.form.on("Item", {
+	validate(frm) {
+		sc_custom.item_form.sync_default_supplier(frm);
+	},
+	after_save(frm) {
+		frm.__empty_default_supplier_confirmed = false;
+	},
+});
+
+frappe.provide("sc_custom.item_form");
+
+// Default Supplier must always mirror the first Item Supplier row.
+// With no supplier rows, an empty Default Supplier needs explicit confirmation.
+sc_custom.item_form.sync_default_supplier = function (frm) {
+	const first = (frm.doc.supplier_items || [])[0];
+	const supplier = first && first.supplier;
+
+	if (supplier) {
+		let changed = false;
+		if ((frm.doc.item_defaults || []).length) {
+			frm.doc.item_defaults.forEach((d) => {
+				if (d.default_supplier !== supplier) {
+					d.default_supplier = supplier;
+					changed = true;
+				}
+			});
+		} else {
+			frm.add_child("item_defaults", {
+				company: frappe.defaults.get_default("company"),
+				default_supplier: supplier,
+			});
+			changed = true;
+		}
+		if (changed) {
+			frm.refresh_field("item_defaults");
+			frappe.show_alert({
+				message: __("Default Supplier adapted to the first row of Item Supplier."),
+				indicator: "orange",
+			});
+		}
+		return;
+	}
+
+	const has_empty_default =
+		!(frm.doc.item_defaults || []).length ||
+		frm.doc.item_defaults.some((d) => !d.default_supplier);
+
+	// Only purchase items need a default supplier
+	if (!cint(frm.doc.is_purchase_item)) return;
+
+	if (has_empty_default && !frm.__empty_default_supplier_confirmed) {
+		frappe.validated = false;
+		const d = frappe.warn(
+			__("No Default Supplier"),
+			`<p>${__(
+				"A Default Supplier should be selected in the Item Defaults table (Accounting tab)."
+			)}</p>
+			<p>${__("Are you sure you want to save without a Default Supplier?")}</p>`,
+			() => {
+				frm.__empty_default_supplier_confirmed = true;
+				frm.save();
+			},
+			__("Yes")
+		);
+		d.set_secondary_action_label(__("No"));
+	}
+};
+
 frappe.provide("sc_custom.bom_tree");
 
 function format_qty(value) {
