@@ -49,7 +49,13 @@ app_include_js = [
 
 # include js in doctype views
 doctype_js = {
-    "Purchase Order": "public/js/purchase_order.js",
+    "Purchase Order": [
+        "public/js/purchase_order.js",
+        "public/js/supplier_rounding.js"
+    ],
+    "Purchase Invoice": "public/js/supplier_rounding.js",
+    "Purchase Receipt": "public/js/supplier_rounding.js",
+    "Supplier Quotation": "public/js/supplier_rounding.js",
     "Pick List": "public/js/pick_list.js",
     "Stock Entry": "public/js/stock_entry.js",
     "Work Order": "public/js/work_order.js",
@@ -210,6 +216,7 @@ fixtures = [
         "filters": [
             [
                 "name", "in", [
+                    "Supplier-custom_enforce_rounding",
                     "Pick List Item-storage",
                     "Company-default_wip_storage",
                     "Company-default_fg_storage",

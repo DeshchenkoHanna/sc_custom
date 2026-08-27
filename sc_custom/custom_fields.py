@@ -10,6 +10,20 @@ def create_sc_custom_fields():
     """Create custom fields for SC Custom app"""
 
     custom_fields = {
+        "Supplier": [
+            {
+                # Adopted from the field originally created via Customize Form
+                # (Supplier-custom_enforce_rounding) — keep fieldname/label/position
+                # identical so existing supplier data is preserved.
+                "fieldname": "custom_enforce_rounding",
+                "label": "Enforce Rounding",
+                "fieldtype": "Check",
+                "default": "0",
+                "insert_after": "default_price_list",
+                "description": "When checked, purchase documents for this supplier default to rounded total enabled",
+                "translatable": 0
+            }
+        ],
         "Item": [
             {
                 "fieldname": "custom_do_not_explode_default",
