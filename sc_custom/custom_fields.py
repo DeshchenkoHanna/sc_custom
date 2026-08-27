@@ -41,6 +41,29 @@ def create_sc_custom_fields():
                 "translatable": 0
             },
         ],
+        "Material Request Item": [
+            {
+                "fieldname": "custom_default_supplier",
+                "label": "Default Supplier",
+                "fieldtype": "Link",
+                "options": "Supplier",
+                "insert_after": "warehouse",
+                "read_only": 1,
+                "in_list_view": 1,
+                "columns": 2,
+                "translatable": 0
+            },
+            {
+                "fieldname": "custom_supplier_part_no",
+                "label": "Supplier Part No",
+                "fieldtype": "Data",
+                "insert_after": "custom_default_supplier",
+                "read_only": 1,
+                "in_list_view": 1,
+                "columns": 2,
+                "translatable": 0
+            }
+        ],
         "Pick List Item": [
             {
                 "fieldname": "storage",

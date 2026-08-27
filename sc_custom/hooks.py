@@ -178,6 +178,8 @@ doc_events = {
         ]
     },
     "Material Request": {
+        "before_validate": "sc_custom.doctype_events.material_request.set_default_supplier_info",
+        "before_submit": "sc_custom.doctype_events.material_request.warn_missing_default_supplier",
         "on_submit": "sc_custom.fibery_sync.item_events.enqueue_items_from_mr",
         "on_cancel": "sc_custom.fibery_sync.item_events.enqueue_items_from_mr",
         "on_update_after_submit": "sc_custom.fibery_sync.item_events.enqueue_items_from_mr"
@@ -217,6 +219,8 @@ fixtures = [
                     "Serial and Batch Entry-storage",
                     "Stock Reservation Entry-storage",
                     "Subcontracting Order-supplier_storage",
+                    "Material Request Item-custom_default_supplier",
+                    "Material Request Item-custom_supplier_part_no",
                     "Item-custom_do_not_explode_default",
                     "Item-custom_used_in_boms_tab",
                     "Item-custom_used_in_boms_section",

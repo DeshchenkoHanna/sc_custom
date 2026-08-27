@@ -4,6 +4,8 @@ from erpnext.stock.doctype.material_request.material_request import (
 	make_purchase_order_based_on_supplier,
 )
 
+from sc_custom.doctype_events.material_request import get_supplier_info_map
+
 
 @frappe.whitelist()
 def make_purchase_order_with_supplier(source_name, target_doc=None):
@@ -66,3 +68,11 @@ def get_default_supplier_query(doctype, txt, searchfield, start, page_len, filte
 		query = query.select(supplier[meta.title_field])
 
 	return query.run(as_dict=False)
+
+
+@frappe.whitelist()
+def get_default_supplier_info(item_code, company=None):
+	"""Default supplier + supplier part no of one item, for the Material Request grid."""
+	return get_supplier_info_map([item_code], company).get(
+		item_code, {"default_supplier": None, "supplier_part_no": None}
+	)

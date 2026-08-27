@@ -21,6 +21,32 @@ frappe.ui.form.on('Material Request', {
 	},
 });
 
+// Show the item's default supplier / supplier part no as soon as it is picked, without
+// waiting for a save (the server recomputes both columns on every save and submit).
+frappe.ui.form.on('Material Request Item', {
+	item_code: function (frm, cdt, cdn) {
+		let row = frappe.get_doc(cdt, cdn);
+
+		if (!row.item_code || frm.doc.material_request_type !== 'Purchase') {
+			frappe.model.set_value(cdt, cdn, 'custom_default_supplier', null);
+			frappe.model.set_value(cdt, cdn, 'custom_supplier_part_no', null);
+			return;
+		}
+
+		frappe.call({
+			method: 'sc_custom.api.material_request.get_default_supplier_info',
+			args: { item_code: row.item_code, company: frm.doc.company },
+			callback: function (r) {
+				// The row may have been deleted or repointed while the request was in flight.
+				let current = locals[cdt] && locals[cdt][cdn];
+				if (!r.message || !current || current.item_code !== row.item_code) return;
+				frappe.model.set_value(cdt, cdn, 'custom_default_supplier', r.message.default_supplier);
+				frappe.model.set_value(cdt, cdn, 'custom_supplier_part_no', r.message.supplier_part_no);
+			},
+		});
+	},
+});
+
 function sc_make_purchase_order_with_supplier(frm) {
 	frappe.prompt(
 		{
