@@ -693,7 +693,7 @@ def patched_create_serial_batch_no_ledgers(
         get_type_of_transaction,
     )
     from erpnext.stock.utils import get_combine_datetime
-    from frappe.utils import flt
+    from frappe.utils import flt, nowtime, today
 
     warehouse = warehouse or (
         child_row.rejected_warehouse if child_row.is_rejected else child_row.warehouse
@@ -705,8 +705,10 @@ def patched_create_serial_batch_no_ledgers(
 
     storage = child_row.get("storage") or ""
 
+    # Vouchers without posting fields (e.g. Pick List) fall back to now
     posting_datetime = get_combine_datetime(
-        parent_doc.get("posting_date"), parent_doc.get("posting_time")
+        parent_doc.get("posting_date") or today(),
+        parent_doc.get("posting_time") or nowtime(),
     )
 
     doc = frappe.get_doc(
