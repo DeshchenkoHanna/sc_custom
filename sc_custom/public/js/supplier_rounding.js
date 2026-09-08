@@ -7,12 +7,14 @@
 // Behaviour:
 //   - disable_rounded_total is inherited: from the source document (PR/PO/SQ
 //     references in items) for mapped documents, otherwise from the supplier
-//     flag. The core buying controller overwrites the mapped value with the
-//     doctype default on every new form load, so it is restored here.
-//   - The user may override the value manually; nothing is blocked.
-//   - On submit, if the value disagrees with the supplier flag or with any
-//     source document, one confirmation dialog is shown; declining aborts
-//     the submit (frappe.validated = false, awaited by form.js savesubmit).
+//     flag. Core buying.js overwrites the value with the doctype default during
+//     load; we re-assert the derived value the instant that happens (immediate
+//     display) and also enforce it at validate (race-free guarantee at save).
+//   - The user may override manually; a real click on the checkbox is detected
+//     via a capture-phase DOM listener (programmatic set_value does not fire it),
+//     and once the user has touched it we stop re-asserting for that document.
+//   - On submit, if the value disagrees with the supplier flag or a source
+//     document, one confirmation dialog is shown; declining aborts the submit.
 
 (function () {
 	const DOCTYPES = [
@@ -30,7 +32,6 @@
 	];
 
 	function baseline_disable(doctype) {
-		// same resolution as the core buying controller uses for new docs
 		const df = frappe.meta.get_docfield(doctype, "disable_rounded_total");
 		return cint(df && df.default) || cint(frappe.sys_defaults.disable_rounded_total);
 	}
@@ -72,71 +73,108 @@
 		return out;
 	}
 
-	async function apply_value(frm, value, reason) {
-		if (cint(frm.doc.disable_rounded_total) === cint(value)) return;
-		// set_value fires our disable_rounded_total handler, which recalculates
-		await frm.set_value("disable_rounded_total", cint(value));
-		frappe.show_alert({ message: reason, indicator: "blue" });
-	}
-
-	async function inherit_on_load(frm) {
-		// once per new document: restore/derive the value the core buying
-		// controller overwrote with the doctype default during onload.
-		if (!frm.doc.__islocal) return;
-		if (frm._sc_rounding_applied_for === frm.doc.name) return;
-
-		// A mapped draft (Create > Purchase Invoice) fires refresh several times
-		// while it is being populated; the first one may run before items/supplier
-		// are attached. Only lock the guard once we actually have something to
-		// derive from, so a later refresh can still apply it.
+	// Derive the value this document SHOULD have: from the nearest source
+	// document if it was created against one, otherwise from the supplier flag.
+	// Returns {value, reason} or null when there is nothing to derive yet.
+	async function derive_desired(frm) {
 		const sources = await fetch_source_flags(frm);
 		if (sources.length) {
-			frm._sc_rounding_applied_for = frm.doc.name;
 			const src = sources[0];
-			await apply_value(
-				frm,
-				src.disable,
-				src.disable
-					? __("Rounded total disabled — inherited from {0} {1}.", [
-							__(src.doctype),
-							src.name,
-					  ])
-					: __("Rounded total enabled — inherited from {0} {1}.", [
-							__(src.doctype),
-							src.name,
-					  ])
-			);
-			return;
+			return {
+				value: cint(src.disable),
+				reason: src.disable
+					? __("Rounded total disabled — inherited from {0} {1}.", [__(src.doctype), src.name])
+					: __("Rounded total enabled — inherited from {0} {1}.", [__(src.doctype), src.name]),
+			};
 		}
-
 		if (frm.doc.supplier) {
-			frm._sc_rounding_applied_for = frm.doc.name;
 			const enforce = await supplier_enforces_rounding(frm.doc.supplier);
-			await apply_value(
-				frm,
-				enforce ? 0 : baseline_disable(frm.doc.doctype),
-				enforce
+			return {
+				value: enforce ? 0 : baseline_disable(frm.doc.doctype),
+				reason: enforce
 					? __("Rounded total enabled — supplier {0} enforces rounding.", [frm.doc.supplier])
-					: __("Rounded total set to company default.")
-			);
+					: __("Rounded total set to company default."),
+			};
 		}
-		// nothing to derive yet — leave the guard unset for a later refresh
+		return null;
+	}
+
+	// Programmatic set that does NOT count as a user override.
+	async function set_disable(frm, value) {
+		if (cint(frm.doc.disable_rounded_total) === cint(value)) return false;
+		frm._sc_programmatic = true;
+		try {
+			await frm.set_value("disable_rounded_total", cint(value));
+		} finally {
+			frm._sc_programmatic = false;
+		}
+		return true;
+	}
+
+	// Detect a genuine user click on the checkbox. Programmatic set_value updates
+	// the input via .prop() and does NOT fire the DOM change event, so this only
+	// fires on real user interaction. Bound in the CAPTURE phase so it runs before
+	// frappe's own (bubble-phase) handler — that way _sc_user_touched is set before
+	// the form's disable_rounded_total handler decides whether to re-assert, and a
+	// manual override is never overwritten.
+	function bind_user_click(frm) {
+		if (frm._sc_click_bound) return;
+		const field = frm.fields_dict && frm.fields_dict.disable_rounded_total;
+		const input = field && field.$input && field.$input[0];
+		if (!input) return;
+		frm._sc_click_bound = true;
+		input.addEventListener(
+			"change",
+			() => {
+				frm._sc_user_touched = frm.doc.name;
+			},
+			true
+		);
+	}
+
+	// refresh: derive the desired value and apply it for immediate display. Core
+	// clobbers it back to the default shortly after — the disable_rounded_total
+	// handler below re-asserts the desired value the instant that happens.
+	async function inherit_on_load(frm) {
+		if (!frm.doc.__islocal) return;
+		if (frm._sc_user_touched === frm.doc.name) return;
+
+		const desired = await derive_desired(frm);
+		if (!desired) return;
+		frm._sc_desired = { name: frm.doc.name, value: cint(desired.value), reason: desired.reason };
+		if (await set_disable(frm, desired.value)) {
+			frappe.show_alert({ message: desired.reason, indicator: "blue" });
+		}
+	}
+
+	// validate: race-free guarantee at save. Enforces the derived value unless the
+	// user explicitly clicked the checkbox for this document.
+	async function enforce_on_validate(frm) {
+		if (!frm.doc.__islocal) return;
+		if (frm._sc_user_touched === frm.doc.name) return;
+		const desired =
+			frm._sc_desired && frm._sc_desired.name === frm.doc.name
+				? frm._sc_desired
+				: await derive_desired(frm);
+		if (!desired) return;
+		await set_disable(frm, desired.value);
 	}
 
 	async function on_supplier_change(frm) {
 		if (!frm.doc.supplier) return;
-		// mapped drafts follow their source document, not the supplier
-		if (get_source_refs(frm).length) return;
-		frm._sc_rounding_applied_for = frm.doc.name;
+		if (get_source_refs(frm).length) return; // mapped drafts follow their source
+		frm._sc_user_touched = null; // supplier change re-derives
 		const enforce = await supplier_enforces_rounding(frm.doc.supplier);
-		const target = enforce ? 0 : baseline_disable(frm.doc.doctype);
-		await apply_value(
-			frm,
-			target,
-			enforce
-				? __("Rounded total enabled — supplier {0} enforces rounding.", [frm.doc.supplier])
-				: __("Rounded total reset to company default.")
-		);
+		const value = enforce ? 0 : baseline_disable(frm.doc.doctype);
+		frm._sc_desired = { name: frm.doc.name, value: cint(value) };
+		if (await set_disable(frm, value)) {
+			frappe.show_alert({
+				message: enforce
+					? __("Rounded total enabled — supplier {0} enforces rounding.", [frm.doc.supplier])
+					: __("Rounded total reset to company default."),
+				indicator: "blue",
+			});
+		}
 	}
 
 	async function confirm_on_submit(frm) {
@@ -149,14 +187,8 @@
 			if (doc_disable !== expected) {
 				problems.push(
 					doc_disable
-						? __(
-								"Rounded Total is disabled in this document, but supplier {0} uses rounding.",
-								[frm.doc.supplier]
-						  )
-						: __(
-								"Rounded Total is enabled in this document, but supplier {0} does not use rounding.",
-								[frm.doc.supplier]
-						  )
+						? __("Rounded Total is disabled in this document, but supplier {0} uses rounding.", [frm.doc.supplier])
+						: __("Rounded Total is enabled in this document, but supplier {0} does not use rounding.", [frm.doc.supplier])
 				);
 			}
 		}
@@ -174,9 +206,6 @@
 		if (!problems.length) return;
 
 		await new Promise((resolve) => {
-			// Default to blocking; only an explicit "Submit Anyway" clears it.
-			// onhide covers Cancel / Escape / backdrop close so the promise
-			// always settles and the submit never hangs.
 			frappe.validated = false;
 			const d = frappe.warn(
 				__("Rounded Total Mismatch"),
@@ -194,10 +223,8 @@
 		});
 	}
 
-	// This file is attached to all four doctypes, so it is evaluated (and the
-	// handlers re-registered) whenever any of them is opened. frappe.ui.form.on
-	// does not dedupe — it pushes onto a global, session-lived handler list — so
-	// without a guard before_submit would fire once per form previously opened.
+	// Attached to all four doctypes → evaluated whenever any is opened.
+	// frappe.ui.form.on does not dedupe, so guard registration globally.
 	window._sc_rounding_registered = window._sc_rounding_registered || {};
 
 	DOCTYPES.forEach((doctype) => {
@@ -205,17 +232,35 @@
 		window._sc_rounding_registered[doctype] = true;
 		frappe.ui.form.on(doctype, {
 			refresh(frm) {
+				bind_user_click(frm);
 				inherit_on_load(frm);
+			},
+			onload_post_render(frm) {
+				bind_user_click(frm);
 			},
 			supplier(frm) {
 				return on_supplier_change(frm);
 			},
 			disable_rounded_total(frm) {
-				// core has no handler for this checkbox — without a recalc the
-				// visible totals stay stale until save
 				if (frm.cscript && frm.cscript.calculate_taxes_and_totals) {
 					frm.cscript.calculate_taxes_and_totals();
 				}
+				// Re-assert the derived value the instant core's load-time default
+				// clobbers it (something other than us or the user changed it away
+				// from the derived value on a new document).
+				if (
+					frm.doc.__islocal &&
+					!frm._sc_programmatic &&
+					frm._sc_user_touched !== frm.doc.name &&
+					frm._sc_desired &&
+					frm._sc_desired.name === frm.doc.name &&
+					cint(frm.doc.disable_rounded_total) !== cint(frm._sc_desired.value)
+				) {
+					set_disable(frm, frm._sc_desired.value);
+				}
+			},
+			validate(frm) {
+				return enforce_on_validate(frm);
 			},
 			before_submit(frm) {
 				return confirm_on_submit(frm);
