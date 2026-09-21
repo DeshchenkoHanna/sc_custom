@@ -209,6 +209,10 @@ doc_events = {
     }
 }
 
+    },
+    "Purchase Order": {
+        # Remove the generated item-attachments archive (see api/po_attachments.py)
+        "on_cancel": "sc_custom.api.po_attachments.on_purchase_order_cancel"
 # Custom Fields
 fixtures = [
     {
@@ -283,6 +287,13 @@ scheduler_events = {
 # generated from the base implementation of the doctype dashboard,
 # along with any modifications made in other Frappe apps
 # override_doctype_dashboards = {
+# Purchase Order "Close" writes the status with db_set and fires no doc event, so the
+# item-attachments archive is removed by wrapping the status method (api/po_attachments.py)
+override_whitelisted_methods = {
+    "erpnext.buying.doctype.purchase_order.purchase_order.update_status":
+        "sc_custom.api.po_attachments.update_status"
+}
+#
 # 	"Task": "sc_custom.task.get_dashboard_data"
 # }
 
