@@ -206,13 +206,13 @@ doc_events = {
     "Item": {
         "before_validate": "sc_custom.doctype_events.item.sync_default_supplier_with_supplier_items",
         "on_update": "sc_custom.fibery_sync.item_events.enqueue_item_for_fibery"
-    }
-}
-
     },
     "Purchase Order": {
         # Remove the generated item-attachments archive (see api/po_attachments.py)
         "on_cancel": "sc_custom.api.po_attachments.on_purchase_order_cancel"
+    }
+}
+
 # Custom Fields
 fixtures = [
     {
@@ -283,10 +283,6 @@ scheduler_events = {
 # 	"frappe.desk.doctype.event.event.get_events": "sc_custom.event.get_events"
 # }
 #
-# each overriding function accepts a `data` argument;
-# generated from the base implementation of the doctype dashboard,
-# along with any modifications made in other Frappe apps
-# override_doctype_dashboards = {
 # Purchase Order "Close" writes the status with db_set and fires no doc event, so the
 # item-attachments archive is removed by wrapping the status method (api/po_attachments.py)
 override_whitelisted_methods = {
@@ -294,6 +290,10 @@ override_whitelisted_methods = {
         "sc_custom.api.po_attachments.update_status"
 }
 #
+# each overriding function accepts a `data` argument;
+# generated from the base implementation of the doctype dashboard,
+# along with any modifications made in other Frappe apps
+# override_doctype_dashboards = {
 # 	"Task": "sc_custom.task.get_dashboard_data"
 # }
 
