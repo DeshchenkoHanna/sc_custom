@@ -9,6 +9,7 @@ readme = "README.md"
 dynamic = ["version"]
 dependencies = [
     # "frappe~=15.0.0" # Installed and managed by bench.
+    "py7zr~=1.1",  # 7z output for Purchase Order item attachments (api/po_attachments.py)
 ]
 
 [build-system]
