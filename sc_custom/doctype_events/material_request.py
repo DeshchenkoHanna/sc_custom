@@ -64,6 +64,21 @@ def set_default_supplier_info(doc, method=None):
 		d.custom_supplier_part_no = row_info.get("supplier_part_no")
 
 
+def set_project_on_items(doc, method=None):
+	"""before_validate: fill empty item-row Project from the header Project.
+
+	Covers rows created outside the form (Get Items from BOM, API, bulk update),
+	which the client script never sees. Only empty rows are filled — overwriting
+	a deliberately different row project is a form-only, user-confirmed action.
+	"""
+	if not doc.get("custom_project"):
+		return
+
+	for d in doc.get("items", []):
+		if not d.project:
+			d.project = doc.custom_project
+
+
 def warn_missing_default_supplier(doc, method=None):
 	"""before_submit: non-blocking warning listing lines without a default supplier."""
 	if doc.material_request_type != "Purchase":

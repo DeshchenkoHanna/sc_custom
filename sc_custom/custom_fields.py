@@ -55,6 +55,17 @@ def create_sc_custom_fields():
                 "translatable": 0
             },
         ],
+        "Material Request": [
+            {
+                "fieldname": "custom_project",
+                "label": "Project",
+                "fieldtype": "Link",
+                "options": "Project",
+                "insert_after": "set_warehouse",
+                "description": "Only used to fill the Project field in the Items table below",
+                "translatable": 0
+            }
+        ],
         "Material Request Item": [
             {
                 "fieldname": "custom_default_supplier",
