@@ -12,7 +12,10 @@ version="08" (and NO variant) succeeds, while the version-less request fails
 and variant="001" fails with EBICS_INVALID_ORDER_IDENTIFIER.
 
 This patch wraps EBICSManager.download so that, for H005 Swiss camt
-downloads, version="08" is added to the BusinessTransactionFormat. The
+downloads, version="08" is added to the BusinessTransactionFormat. It also
+corrects the service for camt.054: Alyf requests it as STM, but UBS provisions
+the collective-booking detail under service REP (confirmed in the subscriber's
+HTD permissions and the UBS KeyPort connection-parameters document). The
 H004/H003 path, non-Swiss banks and uploads (pain.001) are left untouched.
 
 When Switzerland retires the next ISO generation, revisit the "08" literal.
@@ -35,13 +38,20 @@ def patched_download(self, request):
     from fintech.ebics import BusinessTransactionFormat
 
     # UBS requires the version to be stated for CH camt downloads. Leave
-    # non-CH or non-camt requests as Alyf built them (version=None).
+    # non-CH or non-camt requests as Alyf built them (version=None, original
+    # service).
     version = None
+    service = request.service
     if self.country_code == "CH" and (request.camt_msg or "").startswith("camt."):
         version = CH_CAMT_VERSION
+        # UBS serves camt.054 (collective-booking detail) under service REP,
+        # while Alyf requests it as STM. Correct it so the batch download is
+        # authorised.
+        if request.camt_msg == "camt.054":
+            service = "REP"
 
     btf = BusinessTransactionFormat(
-        service=request.service,
+        service=service,
         msg_name=request.camt_msg,
         scope=self.country_code,
         container="ZIP",
