@@ -63,7 +63,8 @@ doctype_js = {
     "Batch": "public/js/batch.js",
     "Item": "public/js/item.js",
     "BOM": "public/js/bom.js",
-    "Material Request": "public/js/material_request.js"
+    "Material Request": "public/js/material_request.js",
+    "Bank Transaction": "public/js/bank_transaction.js"
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
@@ -176,6 +177,9 @@ doc_events = {
     },
     "Purchase Invoice": {
         "validate": "sc_custom.doctype_events.purchase_invoice.validate_purchase_invoice"
+    },
+    "Bank Transaction": {
+        "validate": "sc_custom.doctype_events.bank_transaction.validate_bank_transaction"
     },
     "Stock Ledger Entry": {
         "after_insert": [
