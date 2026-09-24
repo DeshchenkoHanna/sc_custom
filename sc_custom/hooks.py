@@ -31,6 +31,8 @@ app_include_js = [
 	# Render new comments immediately (v16 shows them only after refresh)
 	"/assets/sc_custom/js/comment_timeline_fix.js",
 	"/assets/sc_custom/js/item_quick_entry.js",
+	# "Tools > Update Item Names" on draft MRQ / RFQ / PO / STE (FEAT-186)
+	"/assets/sc_custom/js/update_items.js",
 ]
 
 # include js, css files in header of web template
@@ -64,6 +66,7 @@ doctype_js = {
     "Item": "public/js/item.js",
     "BOM": "public/js/bom.js",
     "Material Request": "public/js/material_request.js",
+    "Request for Quotation": "public/js/request_for_quotation.js",
     "Bank Transaction": "public/js/bank_transaction.js"
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}

@@ -1,5 +1,8 @@
 frappe.ui.form.on('Purchase Order', {
     refresh: function(frm) {
+        // "Tools > Update Item Names" (FEAT-186), see public/js/update_items.js
+        sc_custom.update_items.add_button(frm);
+
         // "Create Item Attachments": pack the drawing/CAD files attached to the Item master
         // of every row into one archive (ZIP or 7z) and attach it to the PO as a private file
         // (see sc_custom/api/po_attachments.py)

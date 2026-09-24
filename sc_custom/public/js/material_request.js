@@ -9,6 +9,9 @@ frappe.ui.form.on('Material Request', {
 		sc_apply_project_to_items(frm);
 	},
 	refresh: function (frm) {
+		// "Tools > Update Item Names" (FEAT-186), see public/js/update_items.js
+		sc_custom.update_items.add_button(frm);
+
 		if (frm.doc.docstatus === 1 && frm.doc.material_request_type === 'Purchase') {
 			// Replace the standard all-items "Purchase Order" button with the supplier-prompt one.
 			// (Our refresh runs after erpnext's, which has already added the standard button.)
