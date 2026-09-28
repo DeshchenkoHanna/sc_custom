@@ -76,3 +76,32 @@ def get_default_supplier_info(item_code, company=None):
 	return get_supplier_info_map([item_code], company).get(
 		item_code, {"default_supplier": None, "supplier_part_no": None}
 	)
+
+
+@frappe.whitelist()
+def get_stale_supplier_info(material_request_type, company, rows):
+	"""Compare the supplier info columns as shown on the form with the item master.
+
+	rows: JSON list of {idx, item_code, custom_default_supplier, custom_supplier_part_no}.
+	Returns one entry per row that differs, with old/new values, so the client can show
+	them before the "Permanently Submit?" confirmation. Read-only.
+	"""
+	frappe.has_permission("Material Request", throw=True)
+	if material_request_type != "Purchase":
+		return []
+
+	rows = frappe.parse_json(rows) or []
+	info = get_supplier_info_map([r.get("item_code") for r in rows], company)
+
+	changes = []
+	for r in rows:
+		row_info = info.get(r.get("item_code")) or {}
+		new = {
+			"custom_default_supplier": row_info.get("default_supplier") or None,
+			"custom_supplier_part_no": row_info.get("supplier_part_no") or None,
+		}
+		old = {k: r.get(k) or None for k in new}
+		if old != new:
+			changes.append({"idx": r.get("idx"), "item_code": r.get("item_code"), "old": old, "new": new})
+	return changes
+

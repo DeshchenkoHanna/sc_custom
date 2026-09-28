@@ -5,6 +5,9 @@
 // only the items whose Item Default supplier matches (blank supplier => all items).
 
 frappe.ui.form.on('Material Request', {
+	setup: function (frm) {
+		sc_patch_savesubmit_supplier_check(frm);
+	},
 	custom_project: function (frm) {
 		sc_apply_project_to_items(frm);
 	},
@@ -143,4 +146,109 @@ function sc_make_purchase_order_with_supplier(frm) {
 		__('Enter Supplier'),
 		__('Create')
 	);
+}
+
+// Before the "Permanently Submit?" question, compare the supplier info columns shown on
+// the form with the Item master. The desk reuses a document already loaded in the tab
+// (no server round trip for ~2 minutes), so the rows may still show values from before
+// the item master was changed. If so, the rows are updated on the form and the user is
+// told what changed; the submit itself proceeds as usual afterwards.
+function sc_patch_savesubmit_supplier_check(frm) {
+	if (frm._sc_savesubmit_patched) return;
+	frm._sc_savesubmit_patched = true;
+
+	const original_savesubmit = frm.savesubmit.bind(frm);
+	frm.savesubmit = function (btn, callback, on_error) {
+		if (frm.doc.docstatus !== 0 || frm.doc.material_request_type !== 'Purchase' || !(frm.doc.items || []).length) {
+			return original_savesubmit(btn, callback, on_error);
+		}
+		return sc_check_supplier_info_before_submit(frm).then(() => original_savesubmit(btn, callback, on_error));
+	};
+}
+
+function sc_check_supplier_info_before_submit(frm) {
+	return new Promise((resolve) => {
+		frappe.call({
+			method: 'sc_custom.api.material_request.get_stale_supplier_info',
+			args: {
+				material_request_type: frm.doc.material_request_type,
+				company: frm.doc.company,
+				rows: frm.doc.items.map((row) => ({
+					idx: row.idx,
+					item_code: row.item_code,
+					custom_default_supplier: row.custom_default_supplier,
+					custom_supplier_part_no: row.custom_supplier_part_no,
+				})),
+			},
+			callback: function (r) {
+				const changes = r.message || [];
+				if (!changes.length) return resolve();
+
+				// The grid and the message show suppliers by their title (name). Titles of
+				// suppliers that were never on this form are not cached yet, so fetch them first;
+				// otherwise the row would show the raw supplier ID.
+				const supplier_ids = new Set();
+				changes.forEach((c) => {
+					[c.old.custom_default_supplier, c.new.custom_default_supplier].forEach((v) => {
+						if (v && !frappe.utils.get_link_title('Supplier', v)) supplier_ids.add(v);
+					});
+				});
+				const titles = [...supplier_ids].map((v) => frappe.utils.fetch_link_title('Supplier', v));
+				Promise.all(titles).then(() => sc_show_supplier_info_changes(frm, changes, resolve));
+			},
+			error: function () {
+				// never block the submit because the check itself failed
+				resolve();
+			},
+		});
+	});
+}
+
+function sc_show_supplier_info_changes(frm, changes, resolve) {
+	// Update the rows on the form without marking it dirty (both columns), but only
+	// report rows whose Default Supplier changed; a changed part number alone is silent.
+	const lines = [];
+	changes.forEach((c) => {
+		const row = (frm.doc.items || []).find((d) => d.idx === c.idx);
+		if (row) {
+			row.custom_default_supplier = c.new.custom_default_supplier;
+			row.custom_supplier_part_no = c.new.custom_supplier_part_no;
+		}
+		if (c.old.custom_default_supplier !== c.new.custom_default_supplier) {
+			lines.push(
+				__('Row {0} ({1}): Default Supplier: {2} → {3}', [
+					c.idx,
+					frappe.utils.escape_html(c.item_code || ''),
+					sc_fmt_supplier(c.old.custom_default_supplier),
+					sc_fmt_supplier(c.new.custom_default_supplier),
+				])
+			);
+		}
+	});
+	frm.refresh_field('items');
+
+	if (!lines.length) return resolve();
+
+	const d = new frappe.ui.Dialog({
+		title: __('Supplier Info Updated'),
+		fields: [
+			{
+				fieldtype: 'HTML',
+				fieldname: 'message',
+				options: `<p>${__("The supplier info shown on the form was outdated. The item's data changed:")}</p><p>${lines.join('<br>')}</p>`,
+			},
+		],
+		primary_action_label: __('OK'),
+		primary_action() {
+			d.hide();
+		},
+		onhide: resolve,
+	});
+	d.show();
+}
+
+function sc_fmt_supplier(supplier) {
+	if (!supplier) return __('(empty)');
+	const title = frappe.utils.get_link_title('Supplier', supplier) || supplier;
+	return `<b>${frappe.utils.escape_html(title)}</b>`;
 }

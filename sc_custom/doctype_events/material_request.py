@@ -48,20 +48,62 @@ def get_supplier_info_map(item_codes, company=None):
 	}
 
 
-def set_default_supplier_info(doc, method=None):
-	"""before_validate: refresh the info columns from the item master on every save.
-
-	Runs in the submit cycle too, so the columns and the submit warning always reflect
-	the current Item Default data even after the item master was fixed.
-	"""
+def _get_row_supplier_values(doc):
+	"""Yield (row, {custom_default_supplier, custom_supplier_part_no}) with the values the
+	item master currently gives for each item row (all None for non-Purchase requests)."""
 	info = {}
 	if doc.material_request_type == "Purchase":
 		info = get_supplier_info_map([d.item_code for d in doc.get("items", [])], doc.company)
 
 	for d in doc.get("items", []):
 		row_info = info.get(d.item_code) or {}
-		d.custom_default_supplier = row_info.get("default_supplier")
-		d.custom_supplier_part_no = row_info.get("supplier_part_no")
+		yield d, {
+			"custom_default_supplier": row_info.get("default_supplier") or None,
+			"custom_supplier_part_no": row_info.get("supplier_part_no") or None,
+		}
+
+
+def set_default_supplier_info(doc, method=None):
+	"""before_validate: refresh the info columns from the item master on every save.
+
+	Runs in the submit cycle too, so the columns and the submit warning always reflect
+	the current Item Default data even after the item master was fixed.
+	"""
+	for d, values in _get_row_supplier_values(doc):
+		d.update(values)
+
+
+def refresh_default_supplier_info(doc, method=None):
+	"""onload: sync the info columns of a draft with the item master when the form opens.
+
+	A draft saved before the item master was fixed would otherwise show stale values
+	until somebody saves it again. Changed rows are written straight to the database
+	(update_modified=False, so a later save does not hit a timestamp mismatch) and the
+	loaded document is updated in place, so the form shows exactly what is stored and
+	stays clean.
+
+	getdoc is a GET request and Frappe rolls GET transactions back, hence the explicit
+	commit right after our own writes: at this point in the request nothing else has
+	been written (core onload handlers only read; View Log / _seen are deferred to
+	after the response with their own commit), so only these rows get committed.
+	"""
+	if doc.docstatus != 0 or doc.material_request_type != "Purchase":
+		return
+
+	changed = False
+	for d, values in _get_row_supplier_values(doc):
+		if not d.name or d.get("__islocal"):
+			continue
+		diff = {k: v for k, v in values.items() if (d.get(k) or None) != v}
+		if not diff:
+			continue
+		d.update(diff)
+		frappe.db.set_value(d.doctype, d.name, diff, update_modified=False)
+		changed = True
+
+	if changed:
+		frappe.db.commit()  # nosemgrep: see docstring, GET request would roll back
+		frappe.clear_document_cache(doc.doctype, doc.name)
 
 
 def set_project_on_items(doc, method=None):

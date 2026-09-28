@@ -191,6 +191,7 @@ doc_events = {
         ]
     },
     "Material Request": {
+        "onload": "sc_custom.doctype_events.material_request.refresh_default_supplier_info",
         "before_validate": [
             "sc_custom.doctype_events.material_request.set_default_supplier_info",
             "sc_custom.doctype_events.material_request.set_project_on_items",
