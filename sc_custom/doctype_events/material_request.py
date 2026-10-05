@@ -8,6 +8,7 @@ so users can spot incomplete item masters in advance, and warn about them on sub
 
 import frappe
 from frappe import _
+from frappe.utils import flt
 
 
 def get_supplier_info_map(item_codes, company=None):
@@ -74,20 +75,29 @@ def set_default_supplier_info(doc, method=None):
 
 
 def refresh_default_supplier_info(doc, method=None):
-	"""onload: sync the info columns of a draft with the item master when the form opens.
+	"""onload: sync the info columns with the item master when the form opens.
 
-	A draft saved before the item master was fixed would otherwise show stale values
-	until somebody saves it again. Changed rows are written straight to the database
-	(update_modified=False, so a later save does not hit a timestamp mismatch) and the
-	loaded document is updated in place, so the form shows exactly what is stored and
-	stays clean.
+	Covers drafts and submitted requests that are still open for ordering (not Stopped,
+	less than 100% ordered). A request saved or submitted before the item master was
+	fixed would otherwise show stale values — a submitted one forever, as no save runs
+	on it any more. The columns are display-only (PO creation reads Item Default
+	itself), so updating them after submit is safe.
+
+	Changed rows are written straight to the database (update_modified=False, so a
+	later save does not hit a timestamp mismatch) and the loaded document is updated
+	in place, so the form shows exactly what is stored and stays clean.
 
 	getdoc is a GET request and Frappe rolls GET transactions back, hence the explicit
 	commit right after our own writes: at this point in the request nothing else has
 	been written (core onload handlers only read; View Log / _seen are deferred to
 	after the response with their own commit), so only these rows get committed.
 	"""
-	if doc.docstatus != 0 or doc.material_request_type != "Purchase":
+	if doc.material_request_type != "Purchase":
+		return
+	if doc.docstatus == 1:
+		if doc.status == "Stopped" or flt(doc.per_ordered) >= 100:
+			return
+	elif doc.docstatus != 0:
 		return
 
 	changed = False
