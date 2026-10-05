@@ -1,0 +1,144 @@
+/* Project Stock Overview — Desk page styles (everything under .pso, colours from Desk CSS variables) */
+.pso { padding: 12px var(--padding-md) 8px; font-size: var(--text-sm); color: var(--text-color); }  /* same side padding as the filter bar (.page-form) */
+
+.pso .pso-legend { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 6px 0 10px; font-size: var(--text-xs); color: var(--text-muted); }
+.pso .pso-legend { position: sticky; top: var(--pso-stick, 0px); z-index: 5; background: var(--bg-color); }  /* the legend never scrolls away; below the filter bar (z 6) so its dropdowns open over it */
+.pso .pso-legend .items { display: flex; flex-wrap: wrap; gap: 14px; }
+.pso .pso-legend span.k { display: inline-flex; align-items: center; gap: 6px; }
+.pso .lg { display: inline-block; flex: none; position: relative; }
+.pso .lg.vl { width: 2px; height: 14px; }
+.pso .lg.vl.dark { background: var(--text-color); }
+.pso .lg.vl.red { background: var(--red-500); }
+.pso .lg.vl.grey { background: var(--gray-500); }
+.pso .lg.vl.dl { background: repeating-linear-gradient(to bottom, var(--gray-500) 0 3px, transparent 3px 5px); }
+.pso .lg.vl.dl.other { width: 1px; background: repeating-linear-gradient(to bottom, var(--gray-400) 0 3px, transparent 3px 5px); }
+.pso .lg.seg { width: 18px; height: 4px; border-radius: 2px; background: var(--red-500); }
+.pso .lg.dot { width: 10px; height: 10px; border-radius: 50%; }
+.pso .lg.dot.blue { background: var(--blue-500); }
+.pso .lg.dot.red { background: var(--red-500); }
+.pso .lg.dot.grey { background: var(--gray-300); }
+.pso .lg.tick { width: 2px; height: 7px; background: var(--text-color); }
+
+.pso .pso-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--border-radius-md); overflow: clip; }  /* clip, not hidden: hidden would break the sticky header */
+.pso .pso-scroll { overflow: auto; overscroll-behavior: contain; max-height: calc(100vh - var(--pso-stick, 160px) - 84px); }  /* exact height set in JS (fit_table); wheel scrolling never passes to the page */  /* the table scrolls inside its card (both scrollbars); the header sticks to the card top */
+.pso table.pso-table { width: 100%; min-width: 1100px; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.pso table.pso-table > thead > tr > th, .pso table.pso-table > tbody > tr > td { padding: 8px 10px; border-bottom: 1px solid var(--border-color); vertical-align: middle; white-space: nowrap; text-align: left; }
+.pso table.pso-table > thead > tr > th { position: sticky; top: 0; z-index: 4; height: auto; padding-top: 8px; padding-bottom: 6px; vertical-align: top; background: var(--subtle-fg); font-size: var(--text-xs); font-weight: 500; color: var(--text-muted); cursor: pointer; user-select: none; }
+.pso table.pso-table > thead > tr > th.num, .pso table.pso-table > tbody > tr > td.num { text-align: right; width: 1%; }
+.pso table.pso-table > thead > tr > th[data-k="status"], .pso table.pso-table > tbody > tr > td.status-cell { width: 1%; white-space: nowrap; }
+.pso table.pso-table > thead > tr > th.sorted { color: var(--text-color); }
+.pso table.pso-table > thead > tr > th .arrow { font-size: 9px; margin-left: 3px; }
+.pso table.pso-table > thead > tr > th .hd { display: inline-flex; align-items: center; gap: 5px; }
+.pso table.pso-table > thead > tr > th.num .lbl { text-align: right; }
+.pso table.pso-table > thead > tr > th[data-k="stock"] .hd { align-items: flex-end; }  /* two-line title: the i sits after its second line */
+.pso table.pso-table > tbody > tr:last-child > td { border-bottom: none; }
+
+.pso table.pso-table > tbody > tr > td.item { white-space: normal; width: 200px; min-width: 170px; }  /* beats the generic nowrap rule: the name wraps inside the column */
+.pso td.item .exp { display: inline-block; width: 14px; color: var(--text-muted); font-size: 10px; transition: transform .15s; }
+.pso tr.pso-row.open td.item .exp { transform: rotate(90deg); }
+.pso td.item a.id { font-weight: 500; }
+.pso td.item .nm { color: var(--text-muted); font-size: var(--text-xs); line-height: 1.3; white-space: normal; overflow-wrap: anywhere; }
+.pso td.item .grp { color: var(--text-light); font-size: 11px; white-space: normal; overflow-wrap: anywhere; }
+.pso td.num.zero { color: var(--text-light); }
+.pso td.num.reserved { color: var(--blue-600); font-weight: 600; }
+.pso td.num.order { font-weight: 600; }
+.pso td.num.mr.nz { font-weight: 600; }
+.pso tr.status-short td.num.mr.nz { color: var(--red-600); }
+.pso td.num.other { color: var(--text-muted); }
+.pso tr.pso-row { cursor: pointer; }
+.pso tr.pso-row:hover > td, .pso tr.pso-row.open > td { background: var(--subtle-accent); }
+
+.pso td.sched-cell { width: auto; min-width: 380px; padding-top: 4px; padding-bottom: 4px; }  /* fluid: takes all remaining width */
+.pso th.sched .hd { display: inline-flex; }  /* title on the same line as the other column titles */
+.pso th.sched .axis { position: relative; height: 34px; width: 100%; margin-top: 4px; }  /* the time scale on its own row under the title */
+.pso .axis .m { position: absolute; top: 0; font-size: 11px; color: var(--text-light); }
+.pso .axis .m.cur { color: var(--text-color); font-weight: 600; }
+.pso .axis .today { position: absolute; top: 14px; transform: translateX(-50%); font-size: 10px; color: var(--text-color); }
+.pso .axis .mt { position: absolute; bottom: 0; width: 1px; height: 5px; background: var(--gray-300); }
+.pso .axis .tt { position: absolute; bottom: 0; width: 2px; height: 8px; background: var(--text-color); }
+.pso .axis .dlt { position: absolute; bottom: 0; width: 2px; height: 20px; background: repeating-linear-gradient(to bottom, var(--gray-500) 0 3px, transparent 3px 5px); }
+.pso .axis .dl { position: absolute; top: 14px; font-size: 10px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
+.pso .axis .dl.r { transform: translateX(-100%); }
+.pso .sched { position: relative; height: 58px; width: 100%; font-size: 11px; }
+.pso .sched i { display: block; position: absolute; }
+.pso .sched .base { left: 0; right: 0; top: 30px; height: 2px; background: var(--border-color); }
+.pso .sched .tick { top: 23px; width: 2px; height: 8px; background: var(--text-color); }
+.pso .sched .vl { top: 0; bottom: 0; width: 2px; }
+.pso .sched .vl.req.dark { background: var(--text-color); }
+.pso .sched .vl.req.red { background: var(--red-500); }
+.pso .sched .vl.req.grey { background: var(--gray-500); }
+.pso .sched .vl.dl { background: repeating-linear-gradient(to bottom, var(--gray-500) 0 4px, transparent 4px 7px); }
+.pso .sched .vl.dl.other { width: 1px; background: repeating-linear-gradient(to bottom, var(--gray-400) 0 4px, transparent 4px 7px); }
+.pso .sched .dot { top: 25px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; box-shadow: 0 0 0 2px var(--card-bg); }
+.pso .sched .dot.blue { background: var(--blue-500); }
+.pso .sched .dot.red { background: var(--red-500); }
+.pso .sched .dot.grey { background: var(--gray-300); }
+.pso .sched .delay { top: 29px; height: 4px; border-radius: 2px; background: var(--red-500); }
+.pso .sched .lb { position: absolute; white-space: nowrap; color: var(--text-muted); line-height: 1; }
+.pso .sched .lb.top0 { top: 0; font-size: 10px; color: var(--text-light); }  /* other project's deadline, at the top of its line */
+.pso .sched .lb.top1 { top: 0; font-weight: 500; color: var(--text-color); }  /* req N · dd.mm, at the top of its line */
+.pso .sched .lb.top1.red { color: var(--red-600); }
+.pso .sched .lb.top1.grey { color: var(--text-muted); font-weight: 400; }
+.pso .sched .lb.r2 { top: 14px; }  /* second row for a top label that would touch another one */
+.pso .sched .lb.bot { top: 43px; }
+.pso .sched .lb.bot.red { color: var(--red-600); font-weight: 500; }
+.pso .sched .lb.bot.grey { color: var(--text-light); }
+
+/* column definition popover */
+.pso .info { width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--text-light); background: transparent; color: var(--text-light); font: italic 600 10px/1 Georgia, serif; cursor: help; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.pso .info:hover, .pso th.pop-open .info { border-color: var(--blue-500); color: var(--blue-500); }
+.pso th .pop { display: none !important; }  /* content holder, shown in the shared .pso-colpop */
+.pso-colpop { position: fixed; top: 0; left: 0; z-index: 1030; width: 340px; max-width: calc(100vw - 16px); padding: 10px 12px 12px; background: var(--card-bg); color: var(--text-color); border: 1px solid var(--border-color); border-radius: var(--border-radius-md); box-shadow: 0 8px 24px rgba(0, 0, 0, .14); font-size: var(--text-xs); line-height: 1.5; font-weight: 400; white-space: normal; text-align: left; }
+.pso-colpop b { display: block; margin-bottom: 4px; font-size: var(--text-sm); font-weight: 600; color: var(--text-color); }
+.pso-colpop .txt { color: var(--text-color); }
+.pso-colpop .src { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-color); color: var(--text-muted); }
+.pso-colpop .src-l { display: block; margin-bottom: 2px; font-size: 10px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--text-light); }
+.pso-colpop code { font: inherit; font-weight: 600; color: var(--text-color); background: none; padding: 0; border-radius: 0; }
+
+/* detail row */
+.pso tr.detail > td { background: var(--subtle-accent); padding: 10px 12px 14px 36px; white-space: normal; }
+.pso .detail-grid { display: flex; flex-wrap: wrap; gap: 12px 32px; align-items: flex-start; }
+.pso .mini h4 { margin: 0 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); white-space: nowrap; }
+.pso .mini table { width: auto; min-width: 100%; border-collapse: collapse; font-size: var(--text-xs); background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--border-radius); }
+.pso .mini th, .pso .mini td { padding: 5px 10px; border-bottom: 1px solid var(--border-color); white-space: nowrap; text-align: left; vertical-align: middle; }
+.pso .mini th { font-weight: 500; color: var(--text-muted); cursor: default; }
+.pso .mini th.num, .pso .mini td.num { text-align: right; }
+.pso .mini tbody tr:last-child td { border-bottom: none; }
+.pso .mini td.tag { color: var(--text-muted); }
+.pso .mini .this { color: var(--blue-600); font-weight: 500; }
+.pso .mini .oth { color: var(--text-light); }
+.pso .mini td.sum { font-weight: 600; border-top: 1px solid var(--gray-300); }
+.pso .mini .none { color: var(--text-muted); font-size: var(--text-xs); padding: 2px 0; }
+
+.pso .pso-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 6px 2px 0; font-size: var(--text-xs); color: var(--text-light); }
+.pso .pso-empty { padding: 40px; text-align: center; color: var(--text-muted); }
+
+/* keep page head + filter bar on top while the table scrolls */
+.pso-page .page-head { position: sticky; z-index: 7; }
+.pso-page .page-form { position: sticky; z-index: 6; background: var(--card-bg); }
+
+/* schedule markers: one per spot, own delivery = dot, other projects = grey ring; details on click */
+.pso .sched .mk { position: absolute; top: 25px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; box-shadow: 0 0 0 2px var(--card-bg); cursor: pointer; z-index: 2; transition: transform .1s; }
+.pso .sched .mk::before { content: ""; position: absolute; inset: -6px; border-radius: 50%; }  /* bigger click target */
+.pso .sched .mk:hover, .pso .sched .mk.on { transform: scale(1.25); }
+.pso .sched .mk:focus-visible { outline: 2px solid var(--blue-500); outline-offset: 4px; }
+.pso .sched .mk.ring { box-shadow: 0 0 0 2px var(--card-bg), 0 0 0 5px var(--gray-400); }
+.pso .sched .mk.red { background: var(--red-500); }
+.pso .sched .mk.blue { background: var(--blue-500); }
+.pso .sched .mk.dark { background: var(--text-color); }
+.pso .sched .mk.grey { background: var(--gray-400); }
+.pso .lg.dot.ring { margin: 0 3px; box-shadow: 0 0 0 1.5px var(--card-bg), 0 0 0 3.5px var(--gray-400); }
+
+/* marker popup */
+.pso-mpop { position: fixed; z-index: 1030; min-width: 220px; max-width: 480px; padding: 8px 12px 10px; background: var(--card-bg); color: var(--text-color); border: 1px solid var(--border-color); border-radius: var(--border-radius-md); box-shadow: 0 8px 24px rgba(0, 0, 0, .16); font-size: var(--text-xs); }
+.pso-mpop .hd { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 2px; font-size: var(--text-sm); }
+.pso-mpop .x { border: 0; background: transparent; color: var(--text-muted); font-size: 18px; line-height: 1; padding: 0 2px; cursor: pointer; }
+.pso-mpop .sec { margin: 8px 0 2px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+.pso-mpop table { width: 100%; border-collapse: collapse; }
+.pso-mpop td { padding: 4px 12px 4px 0; border-bottom: 1px solid var(--border-color); white-space: nowrap; vertical-align: middle; }
+.pso-mpop td:last-child { padding-right: 0; }
+.pso-mpop tbody tr:last-child td { border-bottom: none; }
+.pso-mpop td.num { text-align: right; font-weight: 600; }
+.pso-mpop td.tag { color: var(--text-muted); }
+.pso-mpop td.prj { color: var(--text-muted); font-weight: 500; }
+.pso-mpop .late { color: var(--red-600); font-weight: 500; }
