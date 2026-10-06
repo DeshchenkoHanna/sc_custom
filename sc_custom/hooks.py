@@ -301,7 +301,10 @@ scheduler_events = {
 # item-attachments archive is removed by wrapping the status method (api/po_attachments.py)
 override_whitelisted_methods = {
     "erpnext.buying.doctype.purchase_order.purchase_order.update_status":
-        "sc_custom.api.po_attachments.update_status"
+        "sc_custom.api.po_attachments.update_status",
+    # Script Reports: send Link titles (project / supplier / customer names) with the
+    # result, so they show consistently instead of depending on the browser cache
+    "frappe.desk.query_report.run": "sc_custom.overrides.report_link_titles.run",
 }
 #
 # each overriding function accepts a `data` argument;
