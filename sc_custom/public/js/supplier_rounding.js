@@ -13,8 +13,9 @@
 //   - The user may override manually; a real click on the checkbox is detected
 //     via a capture-phase DOM listener (programmatic set_value does not fire it),
 //     and once the user has touched it we stop re-asserting for that document.
-//   - On submit, if the value disagrees with the supplier flag or a source
-//     document, one confirmation dialog is shown; declining aborts the submit.
+//   - On submit, if the value disagrees with the supplier flag, one short
+//     confirmation dialog is shown; declining aborts the submit.
+//     Limited to CONFIRM_ON_SUBMIT_DOCTYPES (PO and PINV only).
 
 (function () {
 	const DOCTYPES = [
@@ -22,6 +23,19 @@
 		"Purchase Invoice",
 		"Purchase Receipt",
 		"Supplier Quotation",
+	];
+
+	// Doctypes that show the submit-time "Rounded Total Mismatch" confirmation.
+	// Inheritance and manual override still apply to every doctype in DOCTYPES;
+	// only the dialog is limited to this list.
+	// Purchase Receipt and Supplier Quotation disabled 2026-10-05: their
+	// rounding has no accounting effect, the check on PO and invoice is
+	// sufficient. Uncomment to re-enable.
+	const CONFIRM_ON_SUBMIT_DOCTYPES = [
+		"Purchase Order",
+		"Purchase Invoice",
+		// "Purchase Receipt",
+		// "Supplier Quotation",
 	];
 
 	// Nearest source first: PI from PR beats the PR's own PO reference.
@@ -178,40 +192,38 @@
 	}
 
 	async function confirm_on_submit(frm) {
+		if (!CONFIRM_ON_SUBMIT_DOCTYPES.includes(frm.doc.doctype)) return;
+		if (!frm.doc.supplier) return;
+
+		// Simplified 2026-10-05: one fixed sentence, supplier flag only. The
+		// per-source-document comparison is kept below (commented) in case the
+		// detailed dialog is wanted again.
 		const doc_disable = cint(frm.doc.disable_rounded_total);
-		const problems = [];
+		const enforce = await supplier_enforces_rounding(frm.doc.supplier);
+		const expected = enforce ? 0 : baseline_disable(frm.doc.doctype);
+		if (doc_disable === expected) return;
 
-		if (frm.doc.supplier) {
-			const enforce = await supplier_enforces_rounding(frm.doc.supplier);
-			const expected = enforce ? 0 : baseline_disable(frm.doc.doctype);
-			if (doc_disable !== expected) {
-				problems.push(
-					doc_disable
-						? __("Rounded Total is disabled in this document, but supplier {0} uses rounding.", [frm.doc.supplier])
-						: __("Rounded Total is enabled in this document, but supplier {0} does not use rounding.", [frm.doc.supplier])
-				);
-			}
-		}
-
-		(await fetch_source_flags(frm)).forEach((src) => {
-			if (src.disable !== doc_disable) {
-				problems.push(
-					src.disable
-						? __("The {0} {1} has rounding disabled.", [__(src.doctype), src.name])
-						: __("The {0} {1} has rounding enabled.", [__(src.doctype), src.name])
-				);
-			}
-		});
-
-		if (!problems.length) return;
+		// const problems = [];
+		// problems.push(
+		// 	doc_disable
+		// 		? __("Rounded Total is disabled in this document, but supplier {0} uses rounding.", [frm.doc.supplier])
+		// 		: __("Rounded Total is enabled in this document, but supplier {0} does not use rounding.", [frm.doc.supplier])
+		// );
+		// (await fetch_source_flags(frm)).forEach((src) => {
+		// 	if (src.disable !== doc_disable) {
+		// 		problems.push(
+		// 			src.disable
+		// 				? __("The {0} {1} has rounding disabled.", [__(src.doctype), src.name])
+		// 				: __("The {0} {1} has rounding enabled.", [__(src.doctype), src.name])
+		// 		);
+		// 	}
+		// });
 
 		await new Promise((resolve) => {
 			frappe.validated = false;
 			const d = frappe.warn(
-				__("Rounded Total Mismatch"),
-				`<p>${__("The “Rounded Total” setting is inconsistent:")}</p>
-				<ul><li>${problems.join("</li><li>")}</li></ul>
-				<p>${__("Do you want to submit this document anyway?")}</p>`,
+				__("Rounded Total"),
+				__("Rounding differs from supplier setting."),
 				() => {
 					frappe.validated = true;
 					resolve();
