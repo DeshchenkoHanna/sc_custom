@@ -1,4 +1,5 @@
 import frappe
+from frappe.desk.search import get_link_title
 from erpnext.stock.doctype.material_request.material_request import (
 	make_purchase_order,
 	make_purchase_order_based_on_supplier,
@@ -72,10 +73,17 @@ def get_default_supplier_query(doctype, txt, searchfield, start, page_len, filte
 
 @frappe.whitelist()
 def get_default_supplier_info(item_code, company=None):
-	"""Default supplier + supplier part no of one item, for the Material Request grid."""
-	return get_supplier_info_map([item_code], company).get(
+	"""Default supplier + supplier part no of one item, for the Material Request grid.
+
+	Also returns the supplier's link title, so the client can cache it: the grid shows
+	(and filters) Supplier links by title, which is otherwise only loaded with the form.
+	"""
+	info = get_supplier_info_map([item_code], company).get(
 		item_code, {"default_supplier": None, "supplier_part_no": None}
 	)
+	if info.get("default_supplier"):
+		info["default_supplier_title"] = get_link_title("Supplier", info["default_supplier"])
+	return info
 
 
 @frappe.whitelist()

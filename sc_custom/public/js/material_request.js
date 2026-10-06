@@ -54,6 +54,11 @@ frappe.ui.form.on('Material Request Item', {
 				// The row may have been deleted or repointed while the request was in flight.
 				let current = locals[cdt] && locals[cdt][cdn];
 				if (!r.message || !current || current.item_code !== row.item_code) return;
+				// Cache the title first, so the grid shows (and filters by) the supplier name
+				// instead of the bare ID for a row filled after the form was loaded.
+				if (r.message.default_supplier_title) {
+					frappe.utils.add_link_title('Supplier', r.message.default_supplier, r.message.default_supplier_title);
+				}
 				frappe.model.set_value(cdt, cdn, 'custom_default_supplier', r.message.default_supplier);
 				frappe.model.set_value(cdt, cdn, 'custom_supplier_part_no', r.message.supplier_part_no);
 			},

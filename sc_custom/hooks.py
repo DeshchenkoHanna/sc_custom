@@ -33,6 +33,8 @@ app_include_js = [
 	"/assets/sc_custom/js/item_quick_entry.js",
 	# "Tools > Update Item Names" on draft MRQ / RFQ / PO / STE (FEAT-186)
 	"/assets/sc_custom/js/update_items.js",
+	# Child-table filter row also matches Link columns by their shown title (e.g. supplier name)
+	"/assets/sc_custom/js/grid_link_title_filter.js",
 ]
 
 # include js, css files in header of web template
