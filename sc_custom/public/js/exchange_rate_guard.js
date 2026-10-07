@@ -6,13 +6,17 @@
 // kept rate 1.00 in EUR/USD/GBP and its amounts went into CHF one for one.
 //
 // Behaviour (new documents only, never blocks saving):
-//   - when a foreign currency still has rate 1.00 on load or after a currency
-//     change, fetch the rate for the document date and set it;
+//   - when a foreign currency still has rate 1.00 on load or after a real
+//     currency change, fetch the rate for the document date and set it;
+//   - ERPNext also re-fires `currency` without a change (posting date, supplier
+//     invoice date and transaction date handlers); those are ignored, so a rate
+//     the user typed is never overwritten silently;
 //   - only the rate changes: on a mapped document ERPNext then recalculates the
 //     totals without repricing the items, so the foreign item rates stay as
 //     they were in the source document.
 // The server-side warning (doctype_events/exchange_rate.py) covers what is left,
-// e.g. a rate set back to 1.00 by hand or a saved draft.
+// e.g. a rate set to 1.00 by hand or a saved draft, the same way on new and
+// saved documents.
 
 (function () {
 	const DOCTYPES = ["Purchase Order", "Purchase Receipt", "Purchase Invoice"];
@@ -45,6 +49,17 @@
 			});
 	}
 
+	function on_load(frm) {
+		frm._sc_rate_guard_currency = frm.doc.currency;
+		fix_foreign_rate_one(frm);
+	}
+
+	function on_currency(frm) {
+		if (frm.doc.currency === frm._sc_rate_guard_currency) return;
+		frm._sc_rate_guard_currency = frm.doc.currency;
+		fix_foreign_rate_one(frm);
+	}
+
 	// Attached to all three doctypes → evaluated whenever any is opened.
 	// frappe.ui.form.on does not dedupe, so guard registration globally.
 	window._sc_exchange_rate_guard_registered = window._sc_exchange_rate_guard_registered || {};
@@ -53,8 +68,8 @@
 		if (window._sc_exchange_rate_guard_registered[doctype]) return;
 		window._sc_exchange_rate_guard_registered[doctype] = true;
 		frappe.ui.form.on(doctype, {
-			onload_post_render: fix_foreign_rate_one,
-			currency: fix_foreign_rate_one,
+			onload_post_render: on_load,
+			currency: on_currency,
 		});
 	});
 })();
