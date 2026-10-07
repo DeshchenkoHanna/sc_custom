@@ -55,10 +55,17 @@ app_include_js = [
 doctype_js = {
     "Purchase Order": [
         "public/js/purchase_order.js",
-        "public/js/supplier_rounding.js"
+        "public/js/supplier_rounding.js",
+        "public/js/exchange_rate_guard.js"
     ],
-    "Purchase Invoice": "public/js/supplier_rounding.js",
-    "Purchase Receipt": "public/js/supplier_rounding.js",
+    "Purchase Invoice": [
+        "public/js/supplier_rounding.js",
+        "public/js/exchange_rate_guard.js"
+    ],
+    "Purchase Receipt": [
+        "public/js/supplier_rounding.js",
+        "public/js/exchange_rate_guard.js"
+    ],
     "Supplier Quotation": "public/js/supplier_rounding.js",
     "Pick List": "public/js/pick_list.js",
     "Stock Entry": "public/js/stock_entry.js",
@@ -175,13 +182,19 @@ doc_events = {
         "validate": "sc_custom.doctype_events.delivery_note.validate_delivery_note"
     },
     "Purchase Receipt": {
-        "validate": "sc_custom.doctype_events.purchase_receipt.validate_purchase_receipt"
+        "validate": [
+            "sc_custom.doctype_events.purchase_receipt.validate_purchase_receipt",
+            "sc_custom.doctype_events.exchange_rate.warn_foreign_currency_rate_one"
+        ]
     },
     "Sales Invoice": {
         "validate": "sc_custom.doctype_events.sales_invoice.validate_sales_invoice"
     },
     "Purchase Invoice": {
-        "validate": "sc_custom.doctype_events.purchase_invoice.validate_purchase_invoice"
+        "validate": [
+            "sc_custom.doctype_events.purchase_invoice.validate_purchase_invoice",
+            "sc_custom.doctype_events.exchange_rate.warn_foreign_currency_rate_one"
+        ]
     },
     "Bank Transaction": {
         "validate": "sc_custom.doctype_events.bank_transaction.validate_bank_transaction"
@@ -221,6 +234,7 @@ doc_events = {
         "on_update": "sc_custom.fibery_sync.item_events.enqueue_item_for_fibery"
     },
     "Purchase Order": {
+        "validate": "sc_custom.doctype_events.exchange_rate.warn_foreign_currency_rate_one",
         # Remove the generated item-attachments archive (see api/po_attachments.py)
         "on_cancel": "sc_custom.api.po_attachments.on_purchase_order_cancel"
     }

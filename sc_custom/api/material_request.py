@@ -24,6 +24,8 @@ def make_purchase_order_with_supplier(source_name, target_doc=None):
 	default_supplier = args.get("default_supplier")
 
 	if default_supplier:
+		if not target_doc:
+			target_doc = _new_purchase_order_in_supplier_currency(default_supplier)
 		doc = make_purchase_order_based_on_supplier(
 			source_name, target_doc, {"supplier": default_supplier}
 		)
@@ -35,6 +37,22 @@ def make_purchase_order_with_supplier(source_name, target_doc=None):
 		return doc
 
 	return make_purchase_order(source_name, target_doc)
+
+
+def _new_purchase_order_in_supplier_currency(supplier):
+	"""Start the PO in the supplier's currency so erpnext fetches the exchange rate itself.
+
+	Without a currency, the mapping takes the one of the CHF buying price list at rate 1.00.
+	The form then switches to the supplier's EUR/USD but skips the rate lookup on a mapped
+	document (transaction.js, ``load_after_mapping``), so the PO was saved at rate 1.00
+	(FEAT-218). With the currency set, ``set_price_list_currency`` fetches the rate for the PO
+	date and the item rates are converted from the price list with it. Same currency rule as
+	erpnext ``get_party_details``: the supplier's default currency, if any.
+	"""
+	po = frappe.new_doc("Purchase Order")
+	po.supplier = supplier
+	po.currency = frappe.db.get_value("Supplier", supplier, "default_currency")
+	return po
 
 
 @frappe.whitelist()
