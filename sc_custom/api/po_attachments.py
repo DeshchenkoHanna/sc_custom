@@ -27,8 +27,7 @@ import zipfile
 import frappe
 from frappe import _
 from frappe.core.doctype.file.file import has_permission as file_has_permission
-from frappe.utils import getdate
-from frappe.utils.file_manager import get_max_file_size
+from frappe.utils import cint, getdate
 
 ALLOWED_EXTENSIONS = (".pdf", ".stp", ".step", ".frl3", ".vikx", ".dxf")
 ARCHIVE_FORMATS = ("zip", "7z")
@@ -177,7 +176,8 @@ def _validate_archive_allowed(archive_format: str) -> None:
 
 
 def _validate_archive_size(content: bytes) -> None:
-    max_size = get_max_file_size()
+    """Enforce System Settings > Max File Size (MB); no check when it is empty."""
+    max_size = cint(frappe.get_system_settings("max_file_size")) * 1024 * 1024
     if max_size and len(content) > max_size:
         frappe.throw(
             _("The archive is {0} MB, larger than the maximum file size of {1} MB.").format(
