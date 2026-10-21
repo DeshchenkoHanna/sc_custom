@@ -263,6 +263,17 @@ def create_sc_custom_fields():
     }
 
     create_custom_fields(custom_fields, update=True)
+    create_sc_property_setters()
+
+
+def create_sc_property_setters():
+    """Property setters kept in code (re-applied on migrate)."""
+    from frappe.custom.doctype.property_setter.property_setter import make_property_setter
+
+    # Billing Currency is mandatory on Customer / Supplier: the Default Accounts row is derived from it
+    # (sc_custom.doctype_events.party_currency, FEAT-224)
+    for doctype in ("Customer", "Supplier"):
+        make_property_setter(doctype, "default_currency", "reqd", 1, "Check", validate_fields_for_doctype=False)
 
 
 def execute():

@@ -53,6 +53,9 @@ app_include_js = [
 
 # include js in doctype views
 doctype_js = {
+    # Default Accounts row filled when the Billing Currency is chosen (FEAT-224)
+    "Customer": "public/js/party_currency.js",
+    "Supplier": "public/js/party_currency.js",
     "Purchase Order": [
         "public/js/purchase_order.js",
         "public/js/supplier_rounding.js",
@@ -173,6 +176,13 @@ override_doctype_class = {
 # Hook on document methods and events
 
 doc_events = {
+    # Billing Currency follows the accounting history; Default Accounts row filled per currency (FEAT-224)
+    "Customer": {
+        "before_validate": "sc_custom.doctype_events.party_currency.before_validate_party"
+    },
+    "Supplier": {
+        "before_validate": "sc_custom.doctype_events.party_currency.before_validate_party"
+    },
     "Stock Entry": {
         "validate": "sc_custom.doctype_events.stock_entry.validate_stock_entry",
         "before_submit": "sc_custom.doctype_events.stock_entry.before_submit_stock_entry",
