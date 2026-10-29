@@ -6,6 +6,7 @@ from erpnext.stock.doctype.material_request.material_request import (
 )
 
 from sc_custom.doctype_events.material_request import get_supplier_info_map
+from sc_custom.doctype_events.party_currency import get_party_price_list
 
 
 @frappe.whitelist()
@@ -47,11 +48,17 @@ def _new_purchase_order_in_supplier_currency(supplier):
 	document (transaction.js, ``load_after_mapping``), so the PO was saved at rate 1.00
 	(FEAT-218). With the currency set, ``set_price_list_currency`` fetches the rate for the PO
 	date and the item rates are converted from the price list with it. Same currency rule as
-	erpnext ``get_party_details``: the supplier's default currency, if any.
+	erpnext ``get_party_details``: the supplier's default currency, if any. The buying price
+	list is the supplier's Default Price List (filled per Billing Currency on save, party_currency),
+	else the buying Price List in its currency.
 	"""
+	price_list, currency = frappe.db.get_value("Supplier", supplier, ["default_price_list", "default_currency"])
 	po = frappe.new_doc("Purchase Order")
 	po.supplier = supplier
-	po.currency = frappe.db.get_value("Supplier", supplier, "default_currency")
+	po.currency = currency
+	price_list = price_list or get_party_price_list("Supplier", currency)
+	if price_list:
+		po.buying_price_list = price_list
 	return po
 
 

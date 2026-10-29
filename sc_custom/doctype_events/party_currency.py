@@ -30,6 +30,14 @@ Rules, per company (nothing here blocks a save; ERPNext's own checks still do):
      (Customer / Supplier `validate_currency_for_receivable_payable_and_advance_account` and
      `validate_party_accounts`), so this module adds no check of its own for that.
 
+Default Price List (purchase / sales documents take it; empty -> they keep the Default Buying /
+Selling Price List of Buying / Selling Settings, i.e. CHF prices for a EUR / USD party):
+  4. Empty -> filled with the buying (Supplier) / selling (Customer) Price List in the Billing
+     Currency (see get_party_price_list). A Customer whose Customer Group has a Default Price
+     List stays empty: ERPNext takes the group's list then.
+  5. Billing Currency just changed and the Default Price List is in another currency -> warning,
+     the price list is not replaced.
+
 Accounts per currency are resolved from the chart, first level with exactly one candidate wins:
   advance account  company default advance account -> advance accounts already used in Party
                    Account rows -> account named "...Advance..." (not Employee Advances)
@@ -42,6 +50,11 @@ import frappe
 from frappe import _
 
 ACCOUNT_TYPE = {"Customer": "Receivable", "Supplier": "Payable"}
+# Price List flag and the Settings field holding the default list, per party type
+PRICE_LIST = {
+    "Customer": ("selling", "Selling Settings", "selling_price_list"),
+    "Supplier": ("buying", "Buying Settings", "buying_price_list"),
+}
 
 
 def before_validate_party(doc, method=None):
@@ -51,6 +64,29 @@ def before_validate_party(doc, method=None):
     currency_changed = before is None or before.default_currency != doc.default_currency
     for company in frappe.get_all("Company", pluck="name"):
         _apply_for_company(doc, company, currency_changed)
+    _apply_price_list(doc, currency_changed)
+
+
+def _apply_price_list(doc, currency_changed):
+    if not doc.default_price_list:
+        if doc.doctype == "Customer" and doc.customer_group and frappe.get_cached_value(
+            "Customer Group", doc.customer_group, "default_price_list"
+        ):
+            return  # ERPNext falls back to the Customer Group's list
+        doc.default_price_list = get_party_price_list(doc.doctype, doc.default_currency)
+        return
+    price_list_currency = frappe.get_cached_value("Price List", doc.default_price_list, "currency")
+    if currency_changed and price_list_currency and price_list_currency != doc.default_currency:
+        frappe.msgprint(
+            _("Default Price List {0} is in {1}, the Billing Currency is {2}. Documents of this {3} take prices in {1}.").format(
+                frappe.bold(doc.default_price_list),
+                frappe.bold(price_list_currency),
+                frappe.bold(doc.default_currency),
+                _(doc.doctype),
+            ),
+            title=_("Default Price List"),
+            indicator="orange",
+        )
 
 
 def _apply_for_company(doc, company, currency_changed):
@@ -160,3 +196,23 @@ def get_default_accounts(party_type, currency, company=None):
     if advance:
         result["advance_account"] = advance
     return result
+
+
+@frappe.whitelist()
+def get_party_price_list(party_type, currency):
+    """Enabled buying (Supplier) / selling (Customer) Price List in `currency` for the party's
+    Default Price List.
+
+    The Default Buying / Selling Price List of Buying / Selling Settings when it is in that
+    currency (CHF has more than one enabled buying list), else the only enabled list of that kind
+    in that currency; none or several -> None. Used by the before_validate hook, the Customer /
+    Supplier form and the Material Request -> Purchase Order mapping.
+    """
+    if party_type not in PRICE_LIST or not currency:
+        return None
+    flag, settings, field = PRICE_LIST[party_type]
+    candidates = frappe.get_all("Price List", filters={flag: 1, "enabled": 1, "currency": currency}, pluck="name")
+    default = frappe.db.get_single_value(settings, field)
+    if default in candidates:
+        return default
+    return candidates[0] if len(candidates) == 1 else None
