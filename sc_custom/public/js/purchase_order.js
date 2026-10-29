@@ -4,8 +4,8 @@ frappe.ui.form.on('Purchase Order', {
         sc_custom.update_items.add_button(frm);
 
         // "Create Item Attachments": pack the drawing/CAD files attached to the Item master
-        // of every row into one archive (ZIP or 7z) and attach it to the PO as a private file
-        // (see sc_custom/api/po_attachments.py)
+        // of every row (and of its Finished Good on subcontracted POs) into one archive (ZIP or 7z)
+        // and attach it to the PO as a private file (see sc_custom/api/po_attachments.py)
         const closed_or_cancelled = frm.doc.docstatus === 2 || frm.doc.status === 'Closed';
         if (!frm.is_new() && (frm.doc.items || []).length && !closed_or_cancelled) {
             frm.add_custom_button(__('Create Item Attachments'), function() {
@@ -119,13 +119,13 @@ sc_custom.run_create_item_attachments = async function(frm, archive_format) {
 
     // 3. Reload so the attachments sidebar shows the new file, then report
     await frm.reload_doc();
-    frappe.show_alert({
-        message: __('{0} attached: {1} files from {2} items, {3} items without attachments skipped', [
-            result.file_name,
-            result.total_files,
-            result.items_with_files,
-            result.items_without_files,
-        ]),
-        indicator: 'green',
-    }, 8);
+    let message = __('{0} attached: {1} files from {2} items', [
+        result.file_name,
+        result.total_files,
+        result.items_with_files,
+    ]);
+    if (result.items_without_files) {
+        message += ', ' + __('{0} items without attachments skipped', [result.items_without_files]);
+    }
+    frappe.show_alert({ message: message, indicator: 'green' }, 8);
 };

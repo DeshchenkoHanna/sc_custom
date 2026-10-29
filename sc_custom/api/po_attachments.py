@@ -2,7 +2,8 @@
 
 Used by the "Create Item Attachments" button on Purchase Order (FEAT-201).
 Collects the drawing / CAD files (.pdf, .stp, .step, .frl3, .vikx, .dxf) attached
-to the Item master of every row in the item table, packs them into a single flat
+to the Item master of every row in the item table (on subcontracted POs also of the
+row's Finished Good, FEAT-233), packs them into a single flat
 archive (ZIP or 7z, chosen by the user) and attaches it to the Purchase Order as a
 **private** file named ``YYYYMMDD_<PO-name>.zip|.7z`` (posting date of the PO at
 generation time). Everyone with read permission on the PO can download it from the
@@ -43,11 +44,11 @@ def get_item_attachment_summary(purchase_order: str) -> dict:
     """Return how many matching files each item of the PO has and whether an
     archive already exists (no content is built). The client calls this before
     showing the format / replace dialog."""
-    items = _get_item_codes(purchase_order)
+    items, service_items = _get_item_codes(purchase_order)
     files_by_item = _collect_files(items)
     existing = _find_existing_archives(purchase_order)
 
-    summary = _summarize(items, files_by_item)
+    summary = _summarize(items, files_by_item, service_items)
     summary["existing_archive"] = existing[0].file_name if existing else None
     return summary
 
@@ -68,7 +69,7 @@ def create_item_attachments(purchase_order: str, archive_format: str = "zip") ->
     if po.docstatus == 2 or po.status == "Closed":
         frappe.throw(_("Item attachments cannot be created for a Cancelled or Closed Purchase Order."))
 
-    items = _get_item_codes(purchase_order)
+    items, service_items = _get_item_codes(purchase_order)
     files_by_item = _collect_files(items)
     if not any(files_by_item.values()):
         frappe.throw(
@@ -98,7 +99,7 @@ def create_item_attachments(purchase_order: str, archive_format: str = "zip") ->
         _restore_files_on_disk(previous)
         raise
 
-    result = _summarize(items, files_by_item)
+    result = _summarize(items, files_by_item, service_items)
     result.update(
         {
             "file_name": file_doc.file_name,
@@ -207,7 +208,11 @@ def _restore_files_on_disk(snapshot: list[tuple[str, bytes]]) -> None:
             frappe.log_error(title="po_attachments: could not restore previous archive on disk")
 
 
-def _summarize(item_codes: list[str], files_by_item: dict[str, list[dict]]) -> dict:
+def _summarize(
+    item_codes: list[str], files_by_item: dict[str, list[dict]], service_items: set[str] = frozenset()
+) -> dict:
+    """Counts for the client messages. Service items of subcontracted rows usually carry
+    no drawings, so they are not reported as skipped when they have no files."""
     per_item = [
         {"item_code": code, "file_count": len(files_by_item.get(code, []))} for code in item_codes
     ]
@@ -215,7 +220,9 @@ def _summarize(item_codes: list[str], files_by_item: dict[str, list[dict]]) -> d
         "items": per_item,
         "total_files": sum(s["file_count"] for s in per_item),
         "items_with_files": sum(1 for s in per_item if s["file_count"]),
-        "items_without_files": sum(1 for s in per_item if not s["file_count"]),
+        "items_without_files": sum(
+            1 for s in per_item if not s["file_count"] and s["item_code"] not in service_items
+        ),
     }
 
 
@@ -298,8 +305,14 @@ def _unique_name(file_name: str, used_names: set[str]) -> str:
     return candidate
 
 
-def _get_item_codes(purchase_order: str) -> list[str]:
-    """Distinct item codes of the saved PO rows, in row order."""
+def _get_item_codes(purchase_order: str) -> tuple[list[str], set[str]]:
+    """Distinct item codes of the saved PO rows, in row order, and the subset that are
+    service items of subcontracted rows.
+
+    On subcontracted POs every row also contributes its Finished Good (``fg_item``),
+    right after the service item: the drawings usually sit on the finished good.
+    ERPNext clears ``fg_item`` on non-subcontracted POs, so no extra check is needed.
+    """
     if not purchase_order:
         frappe.throw(_("Purchase Order is required."))
 
@@ -308,18 +321,21 @@ def _get_item_codes(purchase_order: str) -> list[str]:
     rows = frappe.get_all(
         "Purchase Order Item",
         filters={"parent": purchase_order, "parenttype": "Purchase Order"},
-        fields=["item_code"],
+        fields=["item_code", "fg_item"],
         order_by="idx asc",
     )
 
     seen = set()
     item_codes = []
+    service_items = set()
     for row in rows:
-        code = row.item_code
-        if code and code not in seen:
-            seen.add(code)
-            item_codes.append(code)
-    return item_codes
+        if row.fg_item and row.item_code:
+            service_items.add(row.item_code)
+        for code in (row.item_code, row.fg_item):
+            if code and code not in seen:
+                seen.add(code)
+                item_codes.append(code)
+    return item_codes, service_items
 
 
 def _collect_files(item_codes: list[str]) -> dict[str, list[dict]]:
