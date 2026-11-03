@@ -198,12 +198,18 @@ doc_events = {
         ]
     },
     "Sales Invoice": {
-        "validate": "sc_custom.doctype_events.sales_invoice.validate_sales_invoice"
+        "validate": [
+            "sc_custom.doctype_events.sales_invoice.validate_sales_invoice",
+            # Debit To in CHF for a EUR / USD invoice and party, or an advance account (FEAT-192)
+            "sc_custom.doctype_events.order_party_currency.warn_invoice_party_account"
+        ]
     },
     "Purchase Invoice": {
         "validate": [
             "sc_custom.doctype_events.purchase_invoice.validate_purchase_invoice",
-            "sc_custom.doctype_events.exchange_rate.warn_foreign_currency_rate_one"
+            "sc_custom.doctype_events.exchange_rate.warn_foreign_currency_rate_one",
+            # Credit To in CHF for a EUR / USD invoice and party, or an advance account (FEAT-192)
+            "sc_custom.doctype_events.order_party_currency.warn_invoice_party_account"
         ]
     },
     "Bank Transaction": {
