@@ -244,9 +244,19 @@ doc_events = {
         "on_update": "sc_custom.fibery_sync.item_events.enqueue_item_for_fibery"
     },
     "Purchase Order": {
-        "validate": "sc_custom.doctype_events.exchange_rate.warn_foreign_currency_rate_one",
+        "validate": [
+            "sc_custom.doctype_events.exchange_rate.warn_foreign_currency_rate_one",
+            # Party without Billing Currency / Default Accounts row -> CHF party account (FEAT-192)
+            "sc_custom.doctype_events.order_party_currency.warn_order_party_currency"
+        ],
         # Remove the generated item-attachments archive (see api/po_attachments.py)
         "on_cancel": "sc_custom.api.po_attachments.on_purchase_order_cancel"
+    },
+    "Sales Order": {
+        "validate": "sc_custom.doctype_events.order_party_currency.warn_order_party_currency"
+    },
+    "Payment Request": {
+        "validate": "sc_custom.doctype_events.order_party_currency.warn_payment_request_party_currency"
     }
 }
 
