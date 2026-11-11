@@ -27,6 +27,8 @@ app_license = "mit"
 # include js, css files in header of desk.html
 # app_include_css = "/assets/sc_custom/css/sc_custom.css"
 app_include_js = [
+	# Item "Storage Quantity" table: Item form (via item.js) + report side panel preview
+	"/assets/sc_custom/js/storage_quantity.js",
 	"/assets/sc_custom/js/serial_batch_selector.js",
 	# Render new comments immediately (v16 shows them only after refresh)
 	"/assets/sc_custom/js/item_quick_entry.js",

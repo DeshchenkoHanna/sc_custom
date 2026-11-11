@@ -11,78 +11,8 @@ frappe.ui.form.on("Item", {
 	},
 });
 
-frappe.provide("sc_custom.storage_quantity");
-
-// Stock per Storage (inventory dimension) on the Item form, HTML field
-// custom_storage_quantity. Data: Server Script API get_stock_by_storage_for_item
-// (rows: storage_location, actual_qty). Replaces the Client Script "Populate Item
-// Storage Quantities" (disabled 2026-11-10): that one reused Frappe's internal grid
-// classes and Bootstrap 3 col-xs-*, which the Frappe 16.54 desk no longer lays out
-// (second column collapsed to "A.."). This table is self-contained on purpose.
-$.extend(sc_custom.storage_quantity, {
-	render(frm) {
-		const field = frm.fields_dict.custom_storage_quantity;
-		if (!field) return;
-		const $wrapper = field.$wrapper;
-		$wrapper.html(`<div class="text-muted">${__("Loading quantities...")}</div>`);
-
-		const item_code = frm.doc.name;
-		frappe.call({
-			method: "get_stock_by_storage_for_item",
-			args: { item_code },
-			callback(r) {
-				// the user may have moved to another Item while the call was in flight
-				if (frm.doc.name !== item_code) return;
-				$wrapper.html(sc_custom.storage_quantity.html(r.message || [], frm.doc.stock_uom));
-			},
-		});
-	},
-
-	html(rows, uom) {
-		const box_css = `.sc-storage-qty-box { width: 100%; margin-bottom: var(--margin-md); border: 1px solid var(--table-border-color, var(--border-color));
-					border-radius: var(--radius-md); background-color: var(--subtle-accent); overflow: hidden; }`;
-		if (!rows.length) {
-			// Same look as Frappe's empty child-table grid (.form-grid + .grid-empty): framed box, centred muted text.
-			return `
-				<style>
-					${box_css}
-					.sc-storage-qty-empty { min-height: 75px; display: flex; align-items: center; justify-content: center;
-						padding: var(--padding-lg) var(--padding-sm); color: var(--text-muted); font-size: var(--text-sm); }
-				</style>
-				<div class="sc-storage-qty-box"><div class="sc-storage-qty-empty">${__("No stock found for any storage location.")}</div></div>`;
-		}
-		const total = rows.reduce((sum, row) => sum + (parseFloat(row.actual_qty) || 0), 0);
-		const body = rows
-			.map(
-				(row) => `<tr>
-					<td>${frappe.utils.escape_html(row.storage_location || __("Not Specified"))}</td>
-					<td class="sc-qty">${format_qty(row.actual_qty)}</td>
-				</tr>`
-			)
-			.join("");
-		// Same recipe as Frappe's own child-table grid (frappe/public/scss/common/grid.scss):
-		// outer border + radius-md on the box, muted heading on subtle-fg, rows on fg-color.
-		return `
-			<style>
-				${box_css}
-				.sc-storage-qty { width: 100%; border-collapse: collapse; font-size: var(--text-sm); font-weight: var(--font-weight-regular, 400); letter-spacing: 0.02em; }  /* Frappe grid text style "sm" (grid.scss get_textstyle) */
-				.sc-storage-qty th { padding: 0 8px; height: 32px; font-weight: var(--font-weight-regular, 400); text-align: left; color: var(--text-muted);
-					background-color: var(--subtle-fg); border-bottom: 1px solid var(--table-border-color, var(--border-color)); }
-				.sc-storage-qty td { padding: 6px 8px; background-color: var(--fg-color); border-bottom: 1px solid var(--table-border-color, var(--border-color)); }
-				.sc-storage-qty th + th, .sc-storage-qty td + td { border-left: 1px solid var(--table-border-color, var(--border-color)); }
-				.sc-storage-qty tr:last-child td { border-bottom: none; }
-				.sc-storage-qty .sc-qty { text-align: right; white-space: nowrap; width: 30%; }
-				.sc-storage-qty tfoot th { border-bottom: none; border-top: 1px solid var(--table-border-color, var(--border-color)); }  /* Total row = same style as heading */
-			</style>
-			<div class="sc-storage-qty-box">
-			<table class="sc-storage-qty">
-				<thead><tr><th>${__("Storage Location")}</th><th class="sc-qty">${__("Actual Quantity")} (${frappe.utils.escape_html(uom || "")})</th></tr></thead>
-				<tbody>${body}</tbody>
-				${rows.length > 1 ? `<tfoot><tr><th>${__("Total")}</th><th class="sc-qty">${format_qty(total)}</th></tr></tfoot>` : ""}
-			</table>
-			</div>`;
-	},
-});
+// Storage Quantity table (sc_custom.storage_quantity) lives in public/js/storage_quantity.js
+// (app_include_js): the report side panel needs it outside the Item form too.
 
 frappe.ui.form.on("Item", {
 	validate(frm) {
@@ -154,12 +84,7 @@ sc_custom.item_form.sync_default_supplier = function (frm) {
 
 frappe.provide("sc_custom.bom_tree");
 
-function format_qty(value) {
-	if (value == null) return "";
-	const f = parseFloat(value);
-	if (isNaN(f)) return "";
-	return Number.isInteger(f) ? String(f) : f.toString();
-}
+// format_qty(value) is defined in public/js/storage_quantity.js (global, app_include_js).
 
 $.extend(sc_custom.bom_tree, {
 	setup(frm) {
