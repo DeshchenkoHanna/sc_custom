@@ -119,7 +119,7 @@ def on_purchase_order_cancel(doc, method=None):
     remove_item_attachments(doc.name)
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def update_status(status, name):
     """override_whitelisted_methods wrapper around ERPNext's Purchase Order
     ``update_status`` (Close / Re-open / Deliver). Runs the original first, then

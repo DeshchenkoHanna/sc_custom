@@ -107,7 +107,9 @@ def get_default_supplier_info(item_code, company=None):
 		item_code, {"default_supplier": None, "supplier_part_no": None}
 	)
 	if info.get("default_supplier"):
-		info["default_supplier_title"] = get_link_title("Supplier", info["default_supplier"])
+		info["default_supplier_title"] = (
+			get_link_title("Supplier", info["default_supplier"]) or info["default_supplier"]
+		)
 	return info
 
 

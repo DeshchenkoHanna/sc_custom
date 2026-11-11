@@ -331,11 +331,26 @@ def patched_get_available_item_locations(
     ignore_validation=False,
     picked_item_details=None,
     consider_rejected_warehouses=False,
+    keep_all_locations=False,
+    exclude_warehouses=None,
+    **kwargs,
 ):
-    """Override: prioritize WO warehouse, expand with storage, then trim."""
+    """Override: prioritize WO warehouse, expand with storage, then trim.
+
+    ``keep_all_locations`` / ``exclude_warehouses`` exist in erpnext >= 16.53
+    (fix(stock): Pick List bug fixes, d58ca8f4a4) and are passed by
+    ``PickList.set_item_locations``; ``**kwargs`` absorbs anything core adds later.
+    They are forwarded to the original only when set, so erpnext < 16.53 keeps working.
+    """
     wo_warehouses = None
     if not from_warehouses and hasattr(frappe.local, "_sc_custom_wo_item_warehouses"):
         wo_warehouses = frappe.local._sc_custom_wo_item_warehouses.get(item_code)
+
+    extra = dict(kwargs)
+    if keep_all_locations:
+        extra["keep_all_locations"] = keep_all_locations
+    if exclude_warehouses:
+        extra["exclude_warehouses"] = exclude_warehouses
 
     if not wo_warehouses:
         # No WO context — use original, then add storage
@@ -344,6 +359,7 @@ def patched_get_available_item_locations(
             ignore_validation=ignore_validation,
             picked_item_details=picked_item_details,
             consider_rejected_warehouses=consider_rejected_warehouses,
+            **extra,
         )
         return _expand_locations_with_storage(locations, item_code=item_code)
 
@@ -359,7 +375,9 @@ def patched_get_available_item_locations(
         item_code, [], required_qty, company, consider_rejected_warehouses
     )
 
-    # Filter out WIP/FG warehouses
+    # Filter out WIP/FG warehouses (+ warehouses core asks to exclude, erpnext >= 16.53)
+    if exclude_warehouses:
+        exclude = set(exclude) | set(exclude_warehouses)
     locations = [loc for loc in locations if loc.warehouse not in exclude]
 
     # Filter by already-picked materials
@@ -375,9 +393,12 @@ def patched_get_available_item_locations(
     # Expand with storage BEFORE trimming
     locations = _expand_locations_with_storage(locations, item_code=item_code)
 
-    # Trim to required qty
-    if locations:
-        locations = get_locations_based_on_required_qty(locations, required_qty)
+    # Trim to required qty (core 16.53: keep_all_locations returns every location, prioritized —
+    # WO warehouses are already first here, so just skip the trim)
+    # core signature is (locations, required_qty, priority_warehouses): pass the WO warehouses,
+    # which are already first in the list, so core keeps that order
+    if locations and not keep_all_locations:
+        locations = get_locations_based_on_required_qty(locations, required_qty, wo_warehouses)
 
     # Validate
     if not ignore_validation:
@@ -406,7 +427,7 @@ def patched_get_items_with_location_and_quantity(item_doc, item_location_map, do
             qty = floor(qty)
             stock_qty = qty * item_doc.conversion_factor
             if not stock_qty:
-                break
+                continue  # erpnext 16.53 (d58ca8f4a4): was `break`
 
         serial_nos = None
         if item_location.serial_nos:

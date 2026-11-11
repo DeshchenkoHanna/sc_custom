@@ -9,7 +9,7 @@ Saving is never blocked.
 
 import frappe
 from frappe import _
-from frappe.utils import flt, format_date
+from frappe.utils import flt, format_date, nowdate
 from erpnext.setup.utils import get_exchange_rate
 
 # erpnext AccountsController.check_conversion_rate shows this generic message on Purchase
@@ -22,8 +22,14 @@ def warn_foreign_currency_rate_one(doc, method=None):
     if not doc.currency or doc.currency == company_currency or flt(doc.conversion_rate) != 1:
         return
 
-    date = doc.get("posting_date") or doc.get("transaction_date")
-    rate = flt(get_exchange_rate(doc.currency, company_currency, date, "for_buying"))
+    # erpnext >= 16.53 throws on an empty date and when a non-system user would trigger an
+    # external rate fetch; this hook only warns and must never block the save
+    date = doc.get("posting_date") or doc.get("transaction_date") or nowdate()
+    try:
+        rate = flt(get_exchange_rate(doc.currency, company_currency, date, "for_buying"))
+    except Exception:
+        frappe.clear_last_message()
+        rate = 0
 
     generic = _(ERPNEXT_RATE_ONE_MESSAGE)
     for message in [m for m in frappe.local.message_log if m.get("message") == generic]:

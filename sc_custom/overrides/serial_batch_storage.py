@@ -273,6 +273,27 @@ def patched_get_stock_ledgers_batches(kwargs):
 # Phase 5: Monkey-patched serial availability query with storage support
 # ---------------------------------------------------------------------------
 
+def _set_batch_filter(filters, kwargs):
+    """Mirror of erpnext >= 16.53 ``set_batch_filter`` (commit 3a205e7032); uses core's
+    when present so later core fixes propagate, else the frozen copy below."""
+    from erpnext.stock.doctype.serial_and_batch_bundle import (
+        serial_and_batch_bundle as sabb_module,
+    )
+
+    if hasattr(sabb_module, "set_batch_filter"):
+        return sabb_module.set_batch_filter(filters, kwargs)
+
+    if not kwargs.get("batches"):
+        return True
+
+    batches = sabb_module.get_non_expired_batches(kwargs.get("batches"))
+    if not batches:
+        return False
+
+    filters["batch_no"] = ("in", batches)
+    return True
+
+
 def patched_get_available_serial_nos(kwargs):
     """Override of serial_and_batch_bundle.get_available_serial_nos.
 
@@ -329,7 +350,15 @@ def patched_get_available_serial_nos(kwargs):
         if reserved_serial_nos := sabb_module.get_reserved_serial_nos_for_voucher(
             kwargs, reserved_entries, reserved_voucher_details
         ):
+            # erpnext 16.53 (3a205e7032): drop serial nos already used in the same
+            # document and apply the batch filter before returning
+            ignore = set(kwargs.get("ignore_serial_nos") or [])
+            reserved_serial_nos = [sn for sn in reserved_serial_nos if sn not in ignore]
+            if not reserved_serial_nos or not _set_batch_filter(filters, kwargs):
+                return []
+
             filters["name"] = ("in", reserved_serial_nos)
+
             return sabb_module.get_serial_nos_based_on_filters(
                 filters, fields, order_by, kwargs
             )
@@ -365,12 +394,8 @@ def patched_get_available_serial_nos(kwargs):
     elif kwargs.get("serial_nos"):
         filters["name"] = ("in", kwargs.get("serial_nos"))
 
-    if kwargs.get("batches"):
-        batches = sabb_module.get_non_expired_batches(kwargs.get("batches"))
-        if not batches:
-            return []
-
-        filters["batch_no"] = ("in", batches)
+    if not _set_batch_filter(filters, kwargs):
+        return []
 
     return sabb_module.get_serial_nos_based_on_filters(filters, fields, order_by, kwargs)
 
@@ -530,6 +555,7 @@ def patched_get_picked_batches(kwargs) -> dict:
             & (table.voucher_type == "Pick List")
             & (table.voucher_no.isnotnull())
         )
+        .groupby(child_table.batch_no, child_table.warehouse)  # erpnext 16.53
     )
 
     # --- Phase 7 addition: storage filter ---
@@ -658,6 +684,7 @@ def patched_get_reserved_serial_nos_for_sre(kwargs) -> list:
         .where(
             (sre.docstatus == 1)
             & (sre.item_code == kwargs.item_code)
+            & (sre.status != "Closed")  # erpnext 16.53
             & (sre.delivered_qty < sre.reserved_qty)
             & (sb_entry.delivered_qty < sb_entry.qty)
             & (sre.reservation_based_on == "Serial and Batch")

@@ -29,11 +29,11 @@ app_license = "mit"
 app_include_js = [
 	"/assets/sc_custom/js/serial_batch_selector.js",
 	# Render new comments immediately (v16 shows them only after refresh)
-	"/assets/sc_custom/js/comment_timeline_fix.js",
 	"/assets/sc_custom/js/item_quick_entry.js",
 	# "Tools > Update Item Names" on draft MRQ / RFQ / PO / STE (FEAT-186)
 	"/assets/sc_custom/js/update_items.js",
 	# Child-table filter row also matches Link columns by their shown title (e.g. supplier name)
+	# still required on frappe 16.54 (verified 2026-11-04: without it the grid filter ignores Link titles)
 	"/assets/sc_custom/js/grid_link_title_filter.js",
 ]
 
@@ -342,9 +342,6 @@ scheduler_events = {
 override_whitelisted_methods = {
     "erpnext.buying.doctype.purchase_order.purchase_order.update_status":
         "sc_custom.api.po_attachments.update_status",
-    # Script Reports: send Link titles (project / supplier / customer names) with the
-    # result, so they show consistently instead of depending on the browser cache
-    "frappe.desk.query_report.run": "sc_custom.overrides.report_link_titles.run",
 }
 #
 # each overriding function accepts a `data` argument;
@@ -370,6 +367,8 @@ override_whitelisted_methods = {
 
 # Allow non-System-Manager users to run reports with Link->DocType filters
 # (e.g. Serial and Batch Summary voucher_type); see overrides/query_report_patch.py
+# Still required on frappe 16.54 / erpnext 16.53 (verified 2026-11-04: without it a normal user gets
+# "You do not have permission to access DocType: Stock Entry" on the Voucher Type filter)
 before_request = ["sc_custom.overrides.query_report_patch.apply_patch"]
 before_job = ["sc_custom.overrides.query_report_patch.apply_patch"]
 

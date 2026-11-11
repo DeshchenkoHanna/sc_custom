@@ -180,16 +180,31 @@ def _get_bank_account_currency(bank_account: str) -> str | None:
     return frappe.get_cached_value("Account", account, "account_currency")
 
 
-def patched_create_sepa_bank_transaction(bank_account, company, sepa_transaction, *args, **kwargs):
+def _fx_adjusted(bank_account, sepa_transaction):
     account_currency = _get_bank_account_currency(bank_account)
     transaction_currency = getattr(getattr(sepa_transaction, "amount", None), "currency", None)
 
     if account_currency and transaction_currency and transaction_currency != account_currency:
         booked = get_booked_entry_amount(sepa_transaction, account_currency)
         if booked:
-            sepa_transaction = FXAdjustedTransaction(sepa_transaction, booked)
+            return FXAdjustedTransaction(sepa_transaction, booked)
+    return sepa_transaction
 
-    return _original_create_sepa_bank_transaction(bank_account, company, sepa_transaction, *args, **kwargs)
+
+def patched_create_sepa_bank_transaction(bank_account, *args, **kwargs):
+    """Signature-tolerant: banking < 16.6 calls (bank_account, company, sepa_transaction, ...),
+    banking >= 16.6 (PR #405, multi-company EBICS User) calls (bank_account, sepa_transaction, ...).
+    The SEPATransaction is the first positional argument that carries an ``amount``."""
+    args = list(args)
+    for i, value in enumerate(args):
+        if hasattr(value, "amount"):
+            args[i] = _fx_adjusted(bank_account, value)
+            break
+    else:
+        if "sepa_transaction" in kwargs:
+            kwargs["sepa_transaction"] = _fx_adjusted(bank_account, kwargs["sepa_transaction"])
+
+    return _original_create_sepa_bank_transaction(bank_account, *args, **kwargs)
 
 
 def apply_ebics_fx_amount_patch():
